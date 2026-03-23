@@ -1,0 +1,8 @@
+name = "telework-v1"
+compatibility_date = "2026-03-19"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "telework-test"
+database_id = "70421811-c05e-46e8-9529-f3c6466f04ab"
+migrations_dir = "drizzle"
