@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { db } from "@/db";
+import { getDb } from "@/db";
 import { users } from "@/db/schema/users";
 import { eq } from "drizzle-orm";
 import { verifyPassword } from "@/lib/auth/password";
@@ -20,7 +20,10 @@ export async function loginAction(formData: FormData) {
     return { error: "有効なメールアドレスを入力してください" };
   }
 
+  let redirectUrl: string;
+
   try {
+    const db = await getDb();
     // Query user by email
     const user = await db.query.users.findFirst({
       where: eq(users.email, email),
@@ -44,7 +47,7 @@ export async function loginAction(formData: FormData) {
     // Create session
     await createSession(user.id, user.role);
 
-    // Redirect based on role
+    // Determine redirect target based on role
     const roleDashboards: Record<string, string> = {
       admin: "/admin/employees",
       manager: "/approve",
@@ -52,12 +55,14 @@ export async function loginAction(formData: FormData) {
       employee: "/reports",
     };
 
-    const redirectUrl = roleDashboards[user.role] || "/";
-    redirect(redirectUrl);
+    redirectUrl = roleDashboards[user.role] || "/";
   } catch (error) {
     console.error("Login error:", error);
     return { error: "ログイン処理中にエラーが発生しました" };
   }
+
+  // redirect() throws internally — must be called outside try/catch
+  redirect(redirectUrl);
 }
 
 export async function logoutAction() {

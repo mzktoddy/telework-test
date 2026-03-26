@@ -1,0 +1,11 @@
+{
+  "terminal.integrated.scrollback": 10000,
+  "terminal.integrated.shellIntegration.enabled": true,
+  "terminal.integrated.persistentSessionReviveProcess": "never",
+  "terminal.integrated.enablePersistentSessions": false,
+  "terminal.integrated.confirmOnExit": "hasChildProcesses",
+  "terminal.integrated.persistentSessionScrollback": 100,
+  "terminal.integrated.shellArgs.windows": ["-NoExit", "-Command", "powershell"],
+  "debug.terminal.clearBeforeReusing": true,
+  "debug.node.autoAttach": "off"
+}

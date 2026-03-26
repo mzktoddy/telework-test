@@ -2,13 +2,18 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
+// Edge runtime required for Cloudflare Workers compatibility.
+// Note: Next.js 16 deprecates middleware.ts in favor of proxy.ts, but proxy.ts
+// forces Node.js runtime which is incompatible with opennextjs-cloudflare.
+// Revert to middleware.ts + edge runtime until opennextjs-cloudflare supports proxy.ts.
+export const runtime = "experimental-edge";
+
 const JWT_SECRET = process.env.JWT_SECRET || "default-secret-change-in-production";
 const secret = new TextEncoder().encode(JWT_SECRET);
 const COOKIE_NAME = "session";
 
 // Public routes that don't require authentication
 const publicRoutes = ["/login", "/api/auth/login"];
-const protectedRoutes = ["/reports", "/review", "/approve", "/admin", "/"];
 
 // Role-based route restrictions
 const roleRoutes: Record<string, string[]> = {
@@ -20,7 +25,21 @@ const roleRoutes: Record<string, string[]> = {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow public routes
+  // If authenticated user visits /login, redirect to dashboard
+  if (pathname.startsWith("/login")) {
+    const token = request.cookies.get(COOKIE_NAME)?.value;
+    if (token) {
+      try {
+        await jwtVerify(token, secret);
+        return NextResponse.redirect(new URL("/", request.url));
+      } catch {
+        // Invalid token — let them through to login
+      }
+    }
+    return NextResponse.next();
+  }
+
+  // Allow remaining public routes
   if (publicRoutes.some((route) => pathname.startsWith(route))) {
     return NextResponse.next();
   }
@@ -51,7 +70,6 @@ export async function middleware(request: NextRequest) {
     )?.[1];
 
     if (routeRoles && !routeRoles.includes(role)) {
-      // User doesn't have the required role
       return NextResponse.redirect(new URL("/", request.url));
     }
 
@@ -72,12 +90,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - static files (images, fonts, etc.)
-     * - Next.js internals
-     * - Public auth routes
-     */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg)$).*)",
   ],
 };

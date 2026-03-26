@@ -2,12 +2,17 @@
     "version": "0.2.0",
     "configurations": [
 
-      {
-        "name": "Next.js: debug server-side",
-        "type": "node-terminal",
-        "request": "launch",
-        "command": "npm run dev"
-      },
+     {
+      "name": "Next.js: debug server-side",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "serverReadyAction": {
+        "pattern": "started server on .+, url: (https?://.+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome"
+      }
+    },
       {
         "name": "Next.js: debug client-side",
         "type": "chrome",
@@ -17,26 +22,24 @@
       },
       {
         "name": "Next.js: debug client-side (Firefox)",
-        "type": "chrome",
+        "type": "firefox",
         "request": "launch",
         "url": "http://localhost:3000",
-        //"reAttach": true,
-        // "pathMappings": [
-        //   {
-        //     "url": "webpack://_N_E",
-        //     "path": "${workspaceFolder}"
-        //   }
-        // ]
+        "webRoot": "${workspaceFolder}"
       },
       {
         "name": "Next.js: debug full stack",
         "type": "node",
         "request": "launch",
         "program": "${workspaceFolder}/node_modules/.bin/next",
-        "runtimeArgs": ["--inspect"],
+        "args": ["dev"],
+        "cwd": "${workspaceFolder}",
+        "console": "integratedTerminal",
         "skipFiles": ["<node_internals>/**"],
+        "outFiles": ["${workspaceFolder}/.next/**/*.js"],
+        "sourceMaps": true,
         "serverReadyAction": {
-          "action": "debugWithEdge",
+          "action": "debugWithChrome",
           "killOnServerStop": true,
           "pattern": "- Local:.+(https?://.+)",
           "uriFormat": "%s",

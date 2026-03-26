@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
+import { getDb } from "@/db";
 import { users } from "@/db/schema/users";
 import { eq } from "drizzle-orm";
 import { verifyPassword } from "@/lib/auth/password";
@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const db = await getDb();
     // Query user by email
     const user = await db.query.users.findFirst({
       where: eq(users.email, email),

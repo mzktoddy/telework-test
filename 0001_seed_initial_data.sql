@@ -22,7 +22,7 @@ INSERT INTO users (
   (
     'user-admin-001',
     'admin@telework.local',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWQ2SLsEQNN3/npu',
+    '$2b$10$0hpMDV8kBsnC2WQKUv6q2.HWSlYm6cpc2QjTOkEIfIf6iShJ8Xn82',
     'システム管理者',
     'admin',
     'dept-eng-001',
@@ -33,7 +33,7 @@ INSERT INTO users (
   (
     'user-manager-001',
     'manager@telework.local',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWQ2SLsEQNN3/npu',
+    '$2b$10$0hpMDV8kBsnC2WQKUv6q2.HWSlYm6cpc2QjTOkEIfIf6iShJ8Xn82',
     '管理 太郎',
     'manager',
     'dept-eng-001',
@@ -44,7 +44,7 @@ INSERT INTO users (
   (
     'user-emp-001',
     'employee1@telework.local',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWQ2SLsEQNN3/npu',
+    '$2b$10$0hpMDV8kBsnC2WQKUv6q2.HWSlYm6cpc2QjTOkEIfIf6iShJ8Xn82',
     '従業員 一郎',
     'employee',
     'dept-eng-001',
@@ -55,7 +55,7 @@ INSERT INTO users (
   (
     'user-emp-002',
     'employee2@telework.local',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWQ2SLsEQNN3/npu',
+    '$2b$10$0hpMDV8kBsnC2WQKUv6q2.HWSlYm6cpc2QjTOkEIfIf6iShJ8Xn82',
     '従業員 次郎',
     'employee',
     'dept-sales-001',

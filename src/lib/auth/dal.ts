@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { getSession } from "./session";
-import { db } from "@/db";
+import { getDb } from "@/db";
 import { users } from "@/db/schema/users";
 import { eq } from "drizzle-orm";
 
@@ -25,6 +25,7 @@ export const verifySession = cache(async (): Promise<SessionData> => {
 
 export async function getCurrentUser() {
   const { userId } = await verifySession();
+  const db = await getDb();
 
   const user = await db.query.users.findFirst({
     where: eq(users.id, userId),

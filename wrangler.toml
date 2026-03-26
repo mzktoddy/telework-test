@@ -1,5 +1,10 @@
 name = "telework-v1"
 compatibility_date = "2026-03-19"
+main = ".open-next/worker.js"
+
+[build]
+command = "npm run build:cloudflare"
+cwd = "."
 
 [[d1_databases]]
 binding = "DB"
