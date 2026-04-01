@@ -5,11 +5,20 @@ import { eq } from "drizzle-orm";
 import { verifyPassword } from "@/lib/auth/password";
 import { createSession } from "@/lib/auth/session";
 
-export async function POST(request: NextRequest) {
+function getRoleDashboard(role: string): string {
+  const roleDashboards: Record<string, string> = {
+    admin: "/admin/employees",
+    manager: "/approve",
+    reviewer: "/review",
+    employee: "/reports",
+  };
+  return roleDashboards[role] || "/";
+}
+
+export async function handleLogin(request: NextRequest): Promise<NextResponse> {
   try {
     const { email, password } = await request.json();
 
-    // Basic validation
     if (!email || !password) {
       return NextResponse.json(
         { error: "メールアドレスとパスワードを入力してください" },
@@ -25,7 +34,6 @@ export async function POST(request: NextRequest) {
     }
 
     const db = await getDb();
-    // Query user by email
     const user = await db.query.users.findFirst({
       where: eq(users.email, email),
     });
@@ -37,7 +45,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify password
     const passwordMatch = await verifyPassword(password, user.passwordHash);
 
     if (!passwordMatch) {
@@ -54,7 +61,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create session
     await createSession(user.id, user.role);
 
     return NextResponse.json({
@@ -68,20 +74,10 @@ export async function POST(request: NextRequest) {
       redirect: getRoleDashboard(user.role),
     });
   } catch (error) {
-    console.error("Login API error:", error);
+    console.error("Login handler error:", error);
     return NextResponse.json(
       { error: "ログイン処理中にエラーが発生しました" },
       { status: 500 }
     );
   }
-}
-
-function getRoleDashboard(role: string): string {
-  const roleDashboards: Record<string, string> = {
-    admin: "/admin/employees",
-    manager: "/approve",
-    reviewer: "/review",
-    employee: "/reports",
-  };
-  return roleDashboards[role] || "/";
 }

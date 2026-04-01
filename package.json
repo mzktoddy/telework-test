@@ -31,6 +31,7 @@
     "drizzle-orm": "^0.45.1",
     "jose": "^6.2.2",
     "next": "16.2.0",
+    "phosphor-react": "^1.4.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",

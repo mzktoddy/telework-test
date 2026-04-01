@@ -16,3 +16,5 @@ export {
   SelectValue,
 } from "./select"
 export { FormSelect } from "./form-select"
+export { StatusBadge } from "./status-badge"
+export { DayCard } from "./day-card"
