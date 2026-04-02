@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>テレワーク・プロ | Employees</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 h-screen flex overflow-hidden">
+<!-- GAS template vars – rendered by server, invisible to user -->
+<div id="gasVars" data-user='<?!= user ?>' data-url="<?= scriptUrl ?>" style="display:none"></div>
+
+<!-- ═══════════════════════════ SIDEBAR ═══════════════════════════ -->
+<aside class="flex flex-col h-screen w-64 bg-slate-900 text-white overflow-y-auto flex-shrink-0">
+  <div class="p-6 border-b border-slate-700">
+    <div class="flex items-center justify-center gap-3">
+      <div class="bg-blue-100 rounded-md  text-sm font-bold">
+       <img src="" id="logoImg" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
+      </div>
+      <div>
+        <p class="text-sm font-semibold">マミヤ</p>
+        <p class="text-xs text-slate-400">ITソリューションズ</p>
+      </div>
+    </div>
+  </div>
+  <nav class="flex-1 px-3 py-6 space-y-1" id="sidebarNav"></nav>
+  <div class="px-3 pb-6 border-t border-slate-700 pt-4 space-y-1">
+    <div class="px-4 py-2">
+      <p class="text-sm font-medium" id="sidebarName"></p>
+      <p class="text-xs text-slate-400" id="sidebarEmail"></p>
+    </div>
+    <button onclick="logout()"
+      class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium
+             text-rose-400 hover:bg-slate-800 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
+      </svg>
+      ログアウト
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════ MAIN ══════════════════════════════ -->
+<main class="flex-1 overflow-y-auto p-8">
+
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-slate-900 mb-2">Employees</h1>
+    <p class="text-slate-600">Manage employee accounts and permissions</p>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="mb-6 flex items-center justify-between gap-4">
+    <input id="searchInput" type="text" placeholder="Search by name or email..."
+      class="flex-1 max-w-md h-10 px-3 py-2 border border-slate-300 rounded-lg text-sm
+             focus:outline-none focus:ring-2 focus:ring-blue-300" />
+    <button onclick="openAddModal()"
+      class="h-10 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+      + Add Employee
+    </button>
+  </div>
+
+  <!-- Loading -->
+  <div id="tableLoading" class="text-center py-12 text-slate-400 text-sm">読み込み中...</div>
+
+  <!-- Table -->
+  <div id="tableWrap" class="hidden bg-white border border-slate-200 rounded-xl overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead>
+          <tr class="border-b border-slate-200 bg-slate-50">
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Name</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Email</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Department</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Role</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Status</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody" class="divide-y divide-slate-100"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Feedback message -->
+  <div id="feedbackMsg" class="hidden mt-4 text-sm text-center p-3 rounded-md max-w-md"></div>
+</main>
+
+<!-- ═══════════════════════ ADD EMPLOYEE MODAL ═══════════════════════ -->
+<div id="addModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-md">
+    <div class="p-6 border-b border-slate-100 flex items-center justify-between">
+      <h3 class="text-lg font-semibold text-slate-900">Add Employee</h3>
+      <button onclick="closeAddModal()" class="text-slate-400 hover:text-slate-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1">氏名 *</label>
+        <input id="newName" type="text" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1">メールアドレス *</label>
+        <input id="newEmail" type="email" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1">部署</label>
+        <select id="newDept" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"></select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1">ロール *</label>
+        <select id="newRole" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white">
+          <option value="employee">employee</option>
+          <option value="reviewer">reviewer</option>
+          <option value="manager">manager</option>
+          <option value="admin">admin</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1">パスワード（Google Workspaceのみの場合は空白）</label>
+        <input id="newPassword" type="password" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+      </div>
+      <div id="modalError" class="hidden text-sm text-red-600 bg-red-50 p-2 rounded-md"></div>
+    </div>
+    <div class="p-6 border-t border-slate-100 flex gap-3 justify-end">
+      <button onclick="closeAddModal()"
+        class="h-9 px-4 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50">
+        キャンセル
+      </button>
+      <button onclick="saveEmployee()" id="saveBtn"
+        class="h-9 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors">
+        追加する
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Read GAS template vars from DOM ──────────────────────────
+var _gasEl     = document.getElementById('gasVars');
+var APP_USER   = JSON.parse(_gasEl.getAttribute('data-user') || 'null');
+var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
+
+// ── Sidebar ───────────────────────────────────────────────────
+(function () {
+  if (!APP_USER) return;
+  document.getElementById('sidebarName').textContent  = APP_USER.name;
+  document.getElementById('sidebarEmail').textContent = APP_USER.email;
+
+  var items = [
+    {
+      label: '申請承認', page: 'approve', color: 'text-emerald-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    },
+    {
+      label: '申請履歴', page: 'history', color: 'text-sky-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>',
+    },
+    {
+      label: 'Team Calendar', page: 'calendar', color: 'text-violet-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>',
+    },
+    {
+      label: 'Analytics', page: 'analytics', color: 'text-amber-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>',
+    },
+    {
+      label: 'Employees', page: 'employees', color: 'text-pink-400', active: true,
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>',
+    },
+  ];
+
+  var nav = document.getElementById('sidebarNav');
+  items.forEach(function (item) {
+    var a = document.createElement('a');
+    a.href = SCRIPT_URL + '?page=' + item.page;
+    a.className = [
+      'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
+      item.active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+    ].join(' ');
+    a.innerHTML =
+      '<svg class="w-4 h-4 flex-shrink-0 ' + item.color + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+      item.icon + '</svg>' + item.label;
+    nav.appendChild(a);
+  });
+})();
+
+// ── State ─────────────────────────────────────────────────────
+var allEmployees = [];
+var departments  = [];
+
+// ── Load data ─────────────────────────────────────────────────
+google.script.run
+  .withSuccessHandler(function (data) {
+    document.getElementById('tableLoading').classList.add('hidden');
+    if (!data || data.error) return;
+    allEmployees = data;
+    renderTable(data);
+    document.getElementById('tableWrap').classList.remove('hidden');
+  })
+  .withFailureHandler(function () {
+    document.getElementById('tableLoading').classList.add('hidden');
+  })
+  .getAllEmployees();
+
+google.script.run
+  .withSuccessHandler(function (data) {
+    departments = data || [];
+    var sel = document.getElementById('newDept');
+    sel.innerHTML = '<option value="">未設定</option>';
+    departments.forEach(function (d) {
+      var o = document.createElement('option');
+      o.value = d.name; o.textContent = d.name;
+      sel.appendChild(o);
+    });
+  })
+  .getDepartmentList();
+
+var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; // Replace with your file ID
+google.script.run
+  .withSuccessHandler(function (base64Image) {
+    if (base64Image) {
+      document.getElementById('logoImg').src = base64Image;
+    }
+  })
+  .withFailureHandler(function (error) {
+    console.error('Failed to load logo:', error);
+  })
+  .getImageAsBase64(logoFileId);
+// ── Search filter ─────────────────────────────────────────────
+document.getElementById('searchInput').addEventListener('input', function () {
+  var q = this.value.toLowerCase();
+  var filtered = allEmployees.filter(function (e) {
+    return e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q);
+  });
+  renderTable(filtered);
+});
+
+// ── Render table ──────────────────────────────────────────────
+var ROLE_COLORS = {
+  employee: 'bg-blue-100 text-blue-700',
+  reviewer: 'bg-violet-100 text-violet-700',
+  manager:  'bg-amber-100 text-amber-700',
+  admin:    'bg-rose-100 text-rose-700',
+};
+
+function renderTable(data) {
+  var tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-10 text-center text-sm text-slate-400">社員が見つかりません</td></tr>';
+    return;
+  }
+  data.forEach(function (emp) {
+    var rc  = ROLE_COLORS[emp.role] || 'bg-slate-100 text-slate-700';
+    var row = document.createElement('tr');
+    row.className = 'hover:bg-slate-50 transition-colors';
+    row.innerHTML =
+      '<td class="px-6 py-4">' +
+        '<div class="flex items-center gap-3">' +
+          '<div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-700">' +
+            (emp.name ? emp.name.charAt(0) : '?') +
+          '</div>' +
+          '<span class="text-sm font-medium text-slate-900">' + esc(emp.name) + '</span>' +
+        '</div>' +
+      '</td>' +
+      '<td class="px-6 py-4 text-sm text-slate-600">' + esc(emp.email) + '</td>' +
+      '<td class="px-6 py-4 text-sm text-slate-600">' + esc(emp.department) + '</td>' +
+      '<td class="px-6 py-4">' +
+        '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ' + rc + '">' +
+          esc(emp.role) +
+        '</span>' +
+      '</td>' +
+      '<td class="px-6 py-4">' +
+        (emp.is_active
+          ? '<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700">● Active</span>'
+          : '<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-500">○ Inactive</span>') +
+      '</td>' +
+      '<td class="px-6 py-4">' +
+        '<button onclick="toggleStatus(\'' + emp.id + '\',' + !emp.is_active + ')" ' +
+          'class="text-xs text-blue-600 hover:text-blue-800 font-medium">' +
+          (emp.is_active ? '無効化' : '有効化') +
+        '</button>' +
+      '</td>';
+    tbody.appendChild(row);
+  });
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Toggle status ─────────────────────────────────────────────
+function toggleStatus(userId, active) {
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.error) { showFeedback(r.error, false); return; }
+      showFeedback(active ? '有効化しました' : '無効化しました', true);
+      reloadEmployees();
+    })
+    .withFailureHandler(function () { showFeedback('エラーが発生しました', false); })
+    .toggleEmployeeStatus(userId, active);
+}
+
+// ── Add Employee modal ────────────────────────────────────────
+function openAddModal() {
+  document.getElementById('addModal').classList.remove('hidden');
+  document.getElementById('modalError').classList.add('hidden');
+}
+function closeAddModal() {
+  document.getElementById('addModal').classList.add('hidden');
+  ['newName','newEmail','newPassword'].forEach(function (id) {
+    document.getElementById(id).value = '';
+  });
+}
+
+function saveEmployee() {
+  var name  = document.getElementById('newName').value.trim();
+  var email = document.getElementById('newEmail').value.trim();
+  var dept  = document.getElementById('newDept').value;
+  var role  = document.getElementById('newRole').value;
+  var pass  = document.getElementById('newPassword').value;
+
+  if (!name || !email || !role) {
+    showModalError('氏名・メールアドレス・ロールは必須です');
+    return;
+  }
+
+  var btn = document.getElementById('saveBtn');
+  btn.disabled = true; btn.textContent = '追加中...';
+
+  google.script.run
+    .withSuccessHandler(function (r) {
+      btn.disabled = false; btn.textContent = '追加する';
+      if (r && r.error) { showModalError(r.error); return; }
+      closeAddModal();
+      showFeedback(name + ' を追加しました', true);
+      reloadEmployees();
+    })
+    .withFailureHandler(function () {
+      btn.disabled = false; btn.textContent = '追加する';
+      showModalError('エラーが発生しました');
+    })
+    .addEmployee({ name: name, email: email, department: dept, role: role, password: pass });
+}
+
+function showModalError(msg) {
+  var el = document.getElementById('modalError');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+function showFeedback(msg, ok) {
+  var el = document.getElementById('feedbackMsg');
+  el.textContent = msg;
+  el.className   = 'mt-4 text-sm text-center p-3 rounded-md max-w-md ' +
+    (ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
+  el.classList.remove('hidden');
+  setTimeout(function () { el.classList.add('hidden'); }, 4000);
+}
+
+function reloadEmployees() {
+  allEmployees = [];
+  document.getElementById('tableBody').innerHTML = '';
+  google.script.run
+    .withSuccessHandler(function (data) {
+      if (!data || data.error) return;
+      allEmployees = data;
+      renderTable(data);
+    })
+    .getAllEmployees();
+}
+
+// ── Logout ────────────────────────────────────────────────────
+function logout() {
+  google.script.run
+    .withSuccessHandler(function (r) { window.top.location.href = r.redirectUrl; })
+    .logoutUser();
+}
+</script>
+</body>
+</html>

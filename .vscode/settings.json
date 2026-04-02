@@ -7,5 +7,9 @@
   "terminal.integrated.persistentSessionScrollback": 100,
   "terminal.integrated.shellArgs.windows": ["-NoExit", "-Command", "powershell"],
   "debug.terminal.clearBeforeReusing": true,
-  "debug.node.autoAttach": "off"
+  "debug.node.autoAttach": "off",
+  "html.validate.scripts": false,
+  "files.associations": {
+    "gas/*.html": "html"
+  }
 }

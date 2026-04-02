@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ログイン | テレワーク・プロ</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+
+  <div class="w-full max-w-sm bg-white rounded-xl shadow-lg overflow-hidden">
+
+    <!-- Header -->
+    <div class="space-y-4 text-center pt-8 px-6">
+      <div class="flex justify-center mb-2">
+        <img id="logoImg" src="" alt="Logo" class="h-12 w-12 rounded-lg object-cover" />
+      </div>
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">Mamiya ITS</h1>
+        <p class="text-xs text-gray-500 mt-1">社内報告システム</p>
+      </div>
+      <div class="pt-4">
+        <p class="text-xl font-bold">ログイン</p>
+        <!-- <p class="text-xs text-gray-500 mt-1">プロフェッショナルなワークスペースにアクセス</p> -->
+      </div>
+    </div>
+
+    <!-- Form -->
+    <div class="space-y-5 pb-8 px-6 pt-4">
+      <form id="loginForm" class="space-y-4">
+
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <label for="email" class="text-xs font-medium block">ユーザー名</label>
+          </div>
+          <input id="email" type="email" placeholder="user@telework.pro" required
+            class="h-10 w-full rounded-md border border-gray-300 px-3 py-2 text-sm
+                   focus:outline-none focus:ring-2 focus:ring-gray-400" />
+        </div>
+
+        <div class="space-y-2" id="passwordSection">
+          <div class="flex items-center justify-between">
+            <label for="password" class="text-xs font-medium">パスワード</label>
+            <!-- <a href="#" class="text-xs text-blue-600 hover:text-blue-700">パスワードをお忘れですか?</a> -->
+          </div>
+          <input id="password" type="password" placeholder="パスワードを入力"
+            class="h-10 w-full rounded-md border border-gray-300 px-3 py-2 text-sm
+                   focus:outline-none focus:ring-2 focus:ring-gray-400" />
+          <!-- Dynamic hint: updated after email blur -->
+          <p id="passwordHint" class="text-xs text-gray-400">
+            Google Sheetsのpassword_hash列に対応するパスワード（Google Workspaceセッション有効時は不要）
+          </p>
+        </div>
+
+        <!-- <div class="flex items-center space-x-2 py-1">
+          <input type="checkbox" id="rememberMe" class="rounded border-gray-300" />
+          <label for="rememberMe" class="text-xs text-gray-600 cursor-pointer">
+            ログイン状態を保持する
+          </label>
+        </div> -->
+
+        <div id="errorMsg" class="hidden text-sm text-red-600 text-center bg-red-50 p-3 rounded-md"></div>
+        <div id="infoMsg"  class="hidden text-sm text-blue-700 text-center bg-blue-50 p-3 rounded-md"></div>
+
+        <button type="submit" id="submitBtn"
+          class="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-full transition-colors">
+          サインイン →
+        </button>
+
+        <!-- Google Workspace single-click login -->
+        <button type="button" id="googleBtn" onclick="tryGoogleAuth()"
+          class="w-full h-11 border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-full
+                 transition-colors flex items-center justify-center gap-2 text-sm">
+          <svg class="w-4 h-4" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+          </svg>
+          Google Workspaceでサインイン
+        </button>
+      </form>
+
+      <!-- <div class="text-center text-xs text-gray-600">
+        <p>お困りですか? <a href="#" class="text-blue-600 hover:text-blue-700">サポートに問い合わせる</a></p>
+      </div> -->
+
+      <div class="pt-4 border-t border-gray-200 text-center">
+        <p class="text-xs text-gray-500">© 2026 Mamiya IT Solutions. All rights reserved.</p>
+        <p class="text-xs text-gray-500 mt-1">
+          <a href="#" class="hover:text-gray-700">プライバシーポリシー</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var form       = document.getElementById('loginForm');
+    var errorMsg   = document.getElementById('errorMsg');
+    var infoMsg    = document.getElementById('infoMsg');
+    var submitBtn  = document.getElementById('submitBtn');
+    var googleBtn  = document.getElementById('googleBtn');
+    var emailInput = document.getElementById('email');
+    var passInput  = document.getElementById('password');
+    var passHint   = document.getElementById('passwordHint');
+
+    // Active Google Workspace session email — fetched once on page load
+    var gwsSessionEmail = '';
+
+    // ── On page load: get GWS session email + try silent auto-login ──
+    window.addEventListener('load', function () {
+    //   showInfo('Google Workspaceセッションを確認中...');
+
+      // Load logo image from Google Drive as base64
+      var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; // Replace with your file ID
+      google.script.run
+        .withSuccessHandler(function (base64Image) {
+          if (base64Image) {
+            document.getElementById('logoImg').src = base64Image;
+          }
+        })
+        .withFailureHandler(function (error) {
+          console.error('Failed to load logo:', error);
+        })
+        .getImageAsBase64(logoFileId);
+
+    //   // Step 1: get the GWS session email for client-side hint logic
+    //   google.script.run
+    //     .withSuccessHandler(function (email) {
+    //       gwsSessionEmail = email || '';
+
+    //       if (gwsSessionEmail) {
+    //         // Step 2: active session found — try silent login
+    //         google.script.run
+    //           .withSuccessHandler(function (result) {
+    //             clearMessages();
+    //             if (result && result.success && result.redirectUrl) {
+    //               showInfo('ログイン済みです。リダイレクト中...');
+    //               window.location.replace(result.redirectUrl);
+    //             }
+    //             // error = email not in system; stay on page
+    //           })
+    //           .withFailureHandler(function () { clearMessages(); })
+    //           .loginWithGoogle();
+    //       } else {
+    //         clearMessages(); // No GWS session at all — show form normally
+    //       }
+    //     })
+    //     .withFailureHandler(function () { clearMessages(); })
+    //     .getGwsSessionEmail();
+    });
+
+    // ── Email blur: detect GWS session match → update password hint ──
+    //  PASSWORD is accepted from ONE of two sources:
+    //    1. The plain-text password whose SHA-256 hash is stored in the
+    //       `password_hash` column of the users Google Sheet.
+    //    2. Nothing — when the browser's active Google Workspace session
+    //       email matches the typed email (GWS identity = proof).
+    emailInput.addEventListener('blur', function () {
+      var typed = emailInput.value.trim().toLowerCase();
+      if (!typed) return;
+
+      if (gwsSessionEmail && gwsSessionEmail.toLowerCase() === typed) {
+        // GWS session matches — password not required
+        passInput.removeAttribute('required');
+        passInput.placeholder = '不要（Google Workspaceセッション有効）';
+        passHint.textContent  = '✅ Google Workspaceセッションが確認できました。パスワードは不要です。';
+        passHint.className    = 'text-xs text-green-600 font-medium mt-1';
+      } else {
+        // No GWS match — need the password from the Google Sheet
+        passInput.setAttribute('required', '');
+        passInput.placeholder = 'パスワードを入力';
+        passHint.textContent  = 'Google Sheetsのpassword_hash列に対応するパスワードを入力してください。';
+        passHint.className    = 'text-xs text-gray-400 mt-1';
+      }
+    });
+
+    // ── UI helpers ────────────────────────────────────────────────
+    function setLoading(on) {
+      submitBtn.disabled    = on;
+      googleBtn.disabled    = on;
+      submitBtn.textContent = on ? 'サインイン中...' : 'サインイン →';
+      submitBtn.style.opacity = on ? '0.6' : '1';
+      googleBtn.style.opacity = on ? '0.6' : '1';
+    }
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.classList.remove('hidden');
+      infoMsg.classList.add('hidden');
+    }
+    function showInfo(msg) {
+      infoMsg.textContent = msg;
+      infoMsg.classList.remove('hidden');
+      errorMsg.classList.add('hidden');
+    }
+    function clearMessages() {
+      errorMsg.classList.add('hidden');
+      infoMsg.classList.add('hidden');
+    }
+    function handleResult(result) {
+      if (result && result.error) { showError(result.error); return; }
+      if (result && result.redirectUrl) {
+        showInfo('ログイン成功。リダイレクト中...');
+        // window.location.replace is reliable in GAS’s sandboxed environment.
+        // It replaces the current history entry so Back does not return to Login.
+        window.location.replace(result.redirectUrl);
+      }
+    }
+
+    // ── Email + password form submit ──────────────────────────────
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      clearMessages();
+      var email    = emailInput.value.trim();
+      var password = passInput.value;
+      if (!email) { showError('メールアドレスを入力してください。'); return; }
+      setLoading(true);
+      google.script.run
+        .withSuccessHandler(function (result) { setLoading(false); handleResult(result); })
+        .withFailureHandler(function ()        { setLoading(false); showError('サーバーエラーが発生しました。もう一度お試しください。'); })
+        .loginUser(email, password);
+    });
+
+    // ── Google Workspace button ───────────────────────────────────
+    //  Reads Session.getActiveUser().getEmail() on the server.
+    //  No credentials entered — Google identity is the proof.
+    function tryGoogleAuth() {
+      clearMessages();
+      showInfo('Google Workspaceセッションを確認中...');
+      setLoading(true);
+      google.script.run
+        .withSuccessHandler(function (result) { setLoading(false); handleResult(result); })
+        .withFailureHandler(function ()        { setLoading(false); showError('Google認証に失敗しました。管理者にお問い合わせください。'); })
+        .loginWithGoogle();
+    }
+  </script>
+</body>
+</html>

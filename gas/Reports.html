@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>テレワーク・プロ | 申請</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 h-screen flex overflow-hidden">
+<!-- GAS template vars – rendered by server, invisible to user -->
+<div id="gasVars" data-user='<?!= user ?>' data-url="<?= scriptUrl ?>" style="display:none"></div>
+
+<!-- ═══════════════════════════ SIDEBAR ═══════════════════════════ -->
+<aside class="flex flex-col h-screen w-64 bg-slate-900 text-white overflow-y-auto flex-shrink-0">
+
+  <!-- Logo -->
+  <div class="p-6 border-b border-slate-700">
+    <div class="flex items-center justify-center gap-3">
+      <div class="bg-blue-100 rounded-md  text-sm font-bold">
+       <img src="" id="logoImg" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
+      </div>
+      <div>
+        <p class="text-sm font-semibold">マミヤ</p>
+        <p class="text-xs text-slate-400">ITソリューションズ</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Navigation -->
+  <nav class="flex-1 px-3 py-6 space-y-1" id="sidebarNav"></nav>
+
+  <!-- User + Logout -->
+  <div class="px-3 pb-6 border-t border-slate-700 pt-4 space-y-1">
+    <div class="px-4 py-2">
+      <p class="text-sm font-medium text-white"  id="sidebarName"></p>
+      <p class="text-xs text-slate-400"          id="sidebarEmail"></p>
+    </div>
+    <button onclick="logout()"
+      class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium
+             text-rose-400 hover:bg-slate-800 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
+      </svg>
+      ログアウト
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════ MAIN ══════════════════════════════ -->
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- Left: week + day cards + 申請 button -->
+  <div class="flex flex-col flex-1 overflow-hidden">
+    <div class="flex-1 overflow-y-auto p-8 pb-4">
+
+      <!-- Header -->
+      <div class="mb-8 flex items-center justify-between">
+        <div>
+          <h1 class="text-3xl font-bold text-slate-900 mb-2">在宅勤務許可申請書</h1>
+          <p class="text-slate-600">今後の在宅勤務日を計画してください。</p>
+        </div>
+        <select id="weekSelect"
+          class="h-9 px-4 w-96 text-slate-900 font-medium text-sm border border-slate-800
+                 focus:outline-none focus:ring-2 focus:ring-blue-300 rounded-sm bg-white"></select>
+      </div>
+
+      <!-- Week label -->
+      <div class="flex items-center justify-between mb-6 pb-4 border-b border-slate-200">
+        <h2 class="text-lg font-semibold text-slate-900" id="weekLabel"></h2>
+        <span class="text-sm text-slate-600" id="weekRange"></span>
+      </div>
+      <p class="text-sm font-medium text-slate-700 mb-6" id="monthLabel"></p>
+
+      <!-- Day cards -->
+      <div class="space-y-3" id="dayCards"></div>
+    </div>
+
+    <!-- 申請 button — fixed at bottom of left panel -->
+    <div class="p-8 pt-4 bg-slate-50 border-t border-slate-200">
+      <button id="submitWeekBtn" onclick="submitWeek()"
+        class="w-full h-11 px-6 bg-slate-900 hover:bg-slate-800 text-white text-lg font-medium rounded-full transition-colors flex items-center justify-center gap-2">
+        申請
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Right: detail panel -->
+  <div class="w-5/12 border-l border-slate-200 bg-white overflow-y-auto flex flex-col">
+    <div class="p-8 border-b border-slate-100">
+      <h2 class="text-lg font-semibold text-slate-900">申請詳細</h2>
+      <p class="text-xs text-slate-500 mt-1" id="detailDateLabel">日を選択してください</p>
+    </div>
+    <div class="flex-1 p-8" id="detailPanel">
+      <p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════ SCRIPTS ════════════════════════════ -->
+<script>
+// ── Read GAS template vars from DOM ──────────────────────────
+var _gasEl     = document.getElementById('gasVars');
+var APP_USER   = JSON.parse(_gasEl.getAttribute('data-user') || 'null');
+var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
+
+// ── Sidebar ───────────────────────────────────────────────────
+(function buildSidebar() {
+  if (!APP_USER) return;
+  document.getElementById('sidebarName').textContent  = APP_USER.name;
+  document.getElementById('sidebarEmail').textContent = APP_USER.email;
+
+  var items = [
+    {
+      label: APP_USER.role === 'employee' ? '申請一覧' : '申請承認',
+      page:  APP_USER.role === 'employee' ? 'reports'  : 'approve',
+      color: 'text-emerald-400',
+      icon:  '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+      active: true,
+    },
+    {
+      label: '申請履歴', page: 'history', color: 'text-sky-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>',
+    },
+    {
+      label: 'Team Calendar', page: 'calendar', color: 'text-violet-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>',
+    },
+    {
+      label: 'Analytics', page: 'analytics', color: 'text-amber-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>',
+    },
+  ];
+
+  if (APP_USER.role === 'admin') {
+    items.push({
+      label: 'Employees', page: 'employees', color: 'text-pink-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>',
+    });
+  }
+
+  var nav = document.getElementById('sidebarNav');
+  items.forEach(function (item) {
+    var a = document.createElement('a');
+    a.href = SCRIPT_URL + '?page=' + item.page;
+    a.className = [
+      'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
+      item.active
+        ? 'bg-blue-600 text-white'
+        : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+    ].join(' ');
+    a.innerHTML =
+      '<svg class="w-4 h-4 flex-shrink-0 ' + item.color + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+      item.icon + '</svg>' + item.label;
+    nav.appendChild(a);
+  });
+})();
+
+// ── Load logo from Google Drive ──────────────────────────────
+var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; // Replace with your file ID
+google.script.run
+  .withSuccessHandler(function (base64Image) {
+    if (base64Image) {
+      document.getElementById('logoImg').src = base64Image;
+    }
+  })
+  .withFailureHandler(function (error) {
+    console.error('Failed to load logo:', error);
+  })
+  .getImageAsBase64(logoFileId);
+
+// ── Week helpers ──────────────────────────────────────────────
+function getISOWeek(d) {
+  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  var y = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - y) / 86400000 + 1) / 7);
+}
+
+function getMondayOfWeek(offset) {
+  var today = new Date();
+  var day   = today.getDay() || 7;
+  var monday = new Date(today);
+  monday.setDate(today.getDate() - day + 1 + offset * 7);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+function fmtDate(d) {
+  return d.getFullYear() + '/' +
+    String(d.getMonth() + 1).padStart(2, '0') + '/' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+function isoDate(d) {
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+// ── Populate week selector ────────────────────────────────────
+var weekSel    = document.getElementById('weekSelect');
+var DAY_SHORTS = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+
+for (var w = 0; w < 4; w++) {
+  var mon = getMondayOfWeek(w);
+  var fri = new Date(mon); fri.setDate(mon.getDate() + 4);
+  var opt = document.createElement('option');
+  opt.value = w;
+  opt.textContent = '第' + getISOWeek(mon) + '週　' +
+    fmtDate(mon) + '（月）～' + fmtDate(fri) + '（金）';
+  weekSel.appendChild(opt);
+}
+
+// ── State ─────────────────────────────────────────────────────
+var selectedDayIdx = null;
+var myReports      = [];
+var dayData        = makeFreshDayData();
+var availableTasks = {}; // Store fetched Redmine tasks by day index
+
+function makeFreshDayData() {
+  return [0,1,2,3,4].map(function () {
+    return { workType: 'テレワーク', notes: '', redmineTasks: [], edited: false, savedStatus: null };
+  });
+}
+
+// ── Load reports on page load ─────────────────────────────────
+google.script.run
+  .withSuccessHandler(function (data) {
+    if (data && !data.error) myReports = data;
+    renderWeek();
+  })
+  .withFailureHandler(function () { renderWeek(); })
+  .getMyReports();
+
+// ── Reset on week change ──────────────────────────────────────
+weekSel.addEventListener('change', function () {
+  selectedDayIdx = null;
+  dayData        = makeFreshDayData();
+  document.getElementById('detailDateLabel').textContent = '日を選択してください';
+  document.getElementById('detailPanel').innerHTML =
+    '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
+  renderWeek();  // render immediately from cached myReports
+  // Also refetch from server to ensure data is current
+  google.script.run
+    .withSuccessHandler(function (data) {
+      if (data && !data.error) {
+        myReports = data;
+        dayData = makeFreshDayData(); // reset so renderWeek picks up server data
+        renderWeek();
+      }
+    })
+    .getMyReports();
+});
+
+// ── Render week ───────────────────────────────────────────────
+function renderWeek() {
+  var offset = parseInt(weekSel.value) || 0;
+  var mon    = getMondayOfWeek(offset);
+  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
+  var weekNo = getISOWeek(mon);
+
+  document.getElementById('weekLabel').textContent = '第' + weekNo + '週';
+  document.getElementById('weekRange').textContent = fmtDate(mon) + ' ～ ' + fmtDate(fri);
+  document.getElementById('monthLabel').textContent =
+    mon.getFullYear() + '年' + String(mon.getMonth() + 1).padStart(2, '0') + '月';
+
+  // Find the week-range row in Sheets (multiple day records grouped)
+  var monStr     = isoDate(mon);
+  var friStr     = isoDate(fri);
+  var weekReport = null;
+  for (var r = 0; r < myReports.length; r++) {
+    if (myReports[r].start_date === monStr && myReports[r].end_date === friStr) {
+      weekReport = myReports[r];
+      break;
+    }
+  }
+
+  // Pre-populate dayData from existing report tasks
+  var prevDayData = dayData; // keep reference to current (possibly optimistic) state
+  var tempData = makeFreshDayData();
+  if (weekReport && Array.isArray(weekReport.tasks)) {
+    weekReport.tasks.forEach(function (dayTask) {
+      // dayTask is {date, dayShort, workType, notes, redmineTasks, status}
+      var taskDate = new Date(dayTask.date + 'T00:00:00'); // parse as local date
+      var dayIndex = Math.round((taskDate - mon) / 86400000);
+      if (dayIndex >= 0 && dayIndex < 5) {
+        tempData[dayIndex].workType     = dayTask.workType     || 'テレワーク';
+        tempData[dayIndex].notes        = dayTask.notes        || '';
+        tempData[dayIndex].redmineTasks = dayTask.redmineTasks || [];
+        tempData[dayIndex].edited       = true; // saved to sheet
+        tempData[dayIndex].savedStatus  = dayTask.status; // remember saved status
+      }
+    });
+  }
+  // Merge: preserve optimistic local state when server data hasn't caught up yet
+  for (var k = 0; k < 5; k++) {
+    if (prevDayData[k] && prevDayData[k].savedStatus && !tempData[k].savedStatus) {
+      // Server has no record yet, but we set status locally (optimistic) — keep it
+      tempData[k].savedStatus  = prevDayData[k].savedStatus;
+      tempData[k].edited       = prevDayData[k].edited;
+      tempData[k].workType     = prevDayData[k].workType;
+      tempData[k].notes        = prevDayData[k].notes;
+      tempData[k].redmineTasks = prevDayData[k].redmineTasks;
+    } else if (prevDayData[k] && prevDayData[k].savedStatus &&
+               tempData[k].savedStatus &&
+               _statusRank(prevDayData[k].savedStatus) > _statusRank(tempData[k].savedStatus)) {
+      // Local optimistic status is "ahead" of server (e.g. local=submitted, server=draft)
+      tempData[k].savedStatus = prevDayData[k].savedStatus;
+    }
+  }
+  dayData = tempData;
+
+  var weekStatus = weekReport ? weekReport.status : 'none';
+  var container  = document.getElementById('dayCards');
+  container.innerHTML = '';
+  for (var i = 0; i < 5; i++) {
+    var d = new Date(mon); d.setDate(mon.getDate() + i);
+    container.appendChild(makeDayCard(d, DAY_SHORTS[i], weekStatus, i, weekReport));
+  }
+}
+
+// ── Status badge HTML ─────────────────────────────────────────
+function statusBadgeHtml(status) {
+  var map = {
+    none:              { label: '未作成',     cls: 'bg-slate-100 text-slate-700' },
+    draft:             { label: '作製中',     cls: 'bg-blue-100 text-blue-700' },
+    submitted:         { label: '申請中',     cls: 'bg-orange-100 text-orange-700' },
+    reviewer_approved: { label: '確認中',     cls: 'bg-yellow-100 text-yellow-700' },
+    approved:          { label: '承認済',     cls: 'bg-green-100 text-green-700' },
+    rejected:          { label: '却下',       cls: 'bg-red-100 text-red-700' },
+  };
+  var s = map[status] || map.none;
+  return '<span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ' +
+    s.cls + '">' + s.label + '</span>';
+}
+
+// ── Status rank for optimistic merge (higher = further in workflow) ──
+function _statusRank(s) {
+  var ranks = { none: 0, draft: 1, submitted: 2, reviewer_approved: 3, approved: 4, rejected: 0 };
+  return ranks[s] || 0;
+}
+
+// ── Make day card ─────────────────────────────────────────────
+function makeDayCard(d, dayShort, status, idx, weekReport) {
+  var div = document.createElement('div');
+  
+  // Use savedStatus from dayData (set during renderWeek from server data)
+  var dayStatus = (dayData[idx] && dayData[idx].savedStatus) ? dayData[idx].savedStatus : 'none';
+  
+  div.className = [
+    'flex items-start justify-between p-4 bg-white border rounded-lg cursor-pointer transition-all hover:shadow-md',
+    selectedDayIdx === idx ? 'border-blue-400 border-2' : 'border-slate-200',
+  ].join(' ');
+  
+  var dateStr = 
+    '<div class="flex flex-col items-center justify-center border-slate-300 border-2 p-2 bg-blue-50 rounded-md min-w-16 h-16">' +
+      '<span class="text-2xl font-bold text-slate-900">' + d.getDate() + '</span>' +
+      '<span class="text-xs font-medium text-amber-900 uppercase mt-1">' + dayShort + '</span>' +
+    '</div>';
+  
+  var statusHtml = statusBadgeHtml(dayStatus);
+  
+  div.innerHTML = '<div class="flex items-center gap-4">' + dateStr + '<div>' + statusHtml + '</div></div>';
+  
+  div.addEventListener('click', function () {
+    selectedDayIdx = idx;
+    renderWeek();
+    openDetailPanel(d, dayShort, idx, weekReport);
+  });
+  return div;
+}
+
+// ── Detail panel ──────────────────────────────────────────────
+function openDetailPanel(d, dayShort, idx, weekReport) {
+  var dStr = fmtDate(d);
+  
+  // Show week info if available
+  var weekInfoHtml = '';
+  if (weekReport) {
+    weekInfoHtml = '<div class="mb-6 p-4 bg-slate-100 rounded-lg">' +
+      '<div class="flex justify-between items-center">' +
+        '<div>' +
+          '<p class="text-xs text-slate-600">週情報</p>' +
+          '<p class="text-sm font-semibold text-slate-900">' + 
+            escapeHtml(weekReport.week_title || '不明') + '</p>' +
+          '<p class="text-xs text-slate-500 mt-1">' + 
+            weekReport.start_date + ' ～ ' + weekReport.end_date + '</p>' +
+        '</div>' +
+        '<div class="text-right">' +
+          '<p class="text-xs text-slate-600">申請状態</p>' +
+          statusBadgeHtml(weekReport.status) +
+          '<p class="text-xs text-slate-500 mt-1">登録: ' + 
+            (weekReport.created_at ? weekReport.created_at.split('T')[0] : 'N/A') + '</p>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+  
+  document.getElementById('detailDateLabel').textContent =
+    dStr + ' ' + dayShort + ' の申請書作成';
+
+  var data  = dayData[idx];
+  var panel = document.getElementById('detailPanel');
+  panel.innerHTML = weekInfoHtml +
+    // Redmine sync card
+    '<div class="p-6 mb-6 border-dashed border-2 border-slate-300 bg-blue-50 rounded-lg">' +
+      '<div class="flex items-start gap-3">' +
+        '<span class="text-2xl leading-none">📄</span>' +
+        '<div class="flex-1">' +
+          '<p class="font-medium text-slate-800 text-sm">Redmineから計画されたタスクを同期</p>' +
+          '<p class="text-xs text-slate-500 mt-1">この日にアクティブなRedmineタスクを自動で取り込みます。</p>' +
+        '</div>' +
+      '</div>' +
+      '<button id="syncBtn_' + idx + '" onclick="syncRedmine(' + idx + ')" ' +
+        'class="mt-4 w-full h-9 border border-slate-400 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-full transition-colors">' +
+        (data.redmineTasks && data.redmineTasks.length > 0 ? 'Redmineタスクを再読み込み' : 'Redmineと同期') +
+      '</button>' +
+      '<div id="redmineList_' + idx + '" class="mt-3 space-y-2"></div>' +
+    '</div>' +
+    // Work type
+    '<div class="mb-4">' +
+      '<label class="text-xs font-medium text-slate-700 block mb-1">勤務種別</label>' +
+      '<select id="workType_' + idx + '" ' +
+        'class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">' +
+        '<option value="テレワーク"'  + (data.workType === 'テレワーク'  ? ' selected' : '') + '>テレワーク</option>' +
+        '<option value="オフィス勤務"' + (data.workType === 'オフィス勤務' ? ' selected' : '') + '>オフィス勤務</option>' +
+        '<option value="休暇"'        + (data.workType === '休暇'        ? ' selected' : '') + '>休暇</option>' +
+      '</select>' +
+    '</div>' +
+    // Notes textarea
+    '<div class="mb-6">' +
+      '<label class="text-xs font-medium text-slate-700 block mb-1">業務内容・タスク</label>' +
+      '<textarea id="notes_' + idx + '" rows="5" ' +
+        'placeholder="例: 高優先度の編集レビューに集中..." ' +
+        'class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-300">' +
+        escapeHtml(data.notes) +
+      '</textarea>' +
+    '</div>' +
+    // Action buttons
+    '<div class="flex gap-3">' +
+      '<button onclick="saveDay(' + idx + ')" ' +
+        'class="flex-1 h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors">' +
+        '保存' +
+      '</button>' +
+      '<button onclick="cancelDay(' + idx + ')" ' +
+        'class="flex-1 h-10 px-6 bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-full transition-colors">' +
+        'キャンセル' +
+      '</button>' +
+    '</div>' +
+    '<div id="dayMsg_' + idx + '" class="hidden mt-3 text-sm text-center p-2 rounded-md"></div>';
+
+  // If already has saved tasks, render them as checked checkboxes
+  if (data.redmineTasks && data.redmineTasks.length > 0) {
+    renderRedmineTasks(idx, data.redmineTasks, true);
+  }
+}
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Render Redmine tasks in the sync card
+// fromSavedData=true → read-only green checkmarks from DB
+// fromSavedData=false → interactive checkboxes from fresh API sync
+function renderRedmineTasks(idx, tasks, fromSavedData) {
+  var container = document.getElementById('redmineList_' + idx);
+  if (!container) return;
+
+  if (!tasks || tasks.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  if (fromSavedData) {
+    container.innerHTML = '<p class="text-xs text-slate-600 mb-2 font-semibold">保存されたタスク:</p>' +
+      tasks.map(function (t) {
+        return '<div class="text-xs bg-white border border-green-300 rounded px-3 py-2 text-slate-700">' +
+          '<div class="flex items-center gap-2">' +
+            '<span class="text-green-600">✓</span>' +
+            '<div class="flex-1">' +
+              '<span class="font-medium">#' + escapeHtml(String(t.id || '')) + '</span> ' +
+              '<span>' + escapeHtml(t.subject || '') + '</span>' +
+              (t.project ? '<div class="text-xs text-slate-500 mt-0.5">' + escapeHtml(t.project) + '</div>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    return;
+  }
+
+  // Fresh sync — searchable interactive checkboxes
+  var savedIds = dayData[idx].redmineTasks.map(function (t) { return t.id; });
+  var taskItemsHtml = tasks.map(function (t) {
+    var isChecked = savedIds.indexOf(t.id) > -1;
+    return '<label data-id="' + t.id + '" data-subject="' + escapeHtml(t.subject).toLowerCase() + '" ' +
+      'class="flex items-start gap-2 p-2 bg-white border border-slate-200 rounded cursor-pointer hover:bg-slate-50 transition-colors">' +
+      '<input type="checkbox" value="' + t.id + '" ' + (isChecked ? 'checked' : '') + ' ' +
+        'onchange="toggleRedmineTask(' + idx + ',' + t.id + ',this.checked)" ' +
+        'class="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-300" />' +
+      '<div class="flex-1 text-xs">' +
+        '<div class="font-medium text-slate-900">#' + escapeHtml(String(t.id)) + ' ' + escapeHtml(t.subject) + '</div>' +
+        '<div class="text-slate-500 mt-0.5">' +
+          (t.project ? escapeHtml(t.project) : '') +
+          (t.tracker  ? ' · ' + escapeHtml(t.tracker)  : '') +
+          (t.status   ? ' · ' + escapeHtml(t.status)   : '') +
+          (t.priority ? ' · ' + escapeHtml(t.priority) : '') +
+          (t.dueDate  ? ' · 期限: ' + t.dueDate        : '') +
+        '</div>' +
+      '</div>' +
+    '</label>';
+  }).join('');
+
+  container.innerHTML =
+    '<div class="relative mb-2">' +
+      '<span class="absolute inset-y-0 left-2.5 flex items-center text-slate-400 pointer-events-none">' +
+        '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>' +
+        '</svg>' +
+      '</span>' +
+      '<input type="text" id="redmineSearch_' + idx + '" ' +
+        'placeholder="チケット番号・件名で絞り込み..." ' +
+        'oninput="filterRedmineTasks(' + idx + ')" ' +
+        'class="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-300" />' +
+    '</div>' +
+    '<p class="text-xs text-slate-600 mb-2 font-semibold">選択可能なタスク (' + tasks.length + '件):</p>' +
+    '<div id="redmineTaskList_' + idx + '" class="space-y-1">' + taskItemsHtml + '</div>' +
+    '<p id="redmineNoMatch_' + idx + '" class="hidden text-xs text-slate-400 italic mt-1">一致するチケットが見つかりません</p>';
+}
+
+// Filter ticket list by ticket number or subject
+function filterRedmineTasks(idx) {
+  var input   = document.getElementById('redmineSearch_' + idx);
+  var list    = document.getElementById('redmineTaskList_' + idx);
+  var noMatch = document.getElementById('redmineNoMatch_' + idx);
+  if (!input || !list) return;
+
+  var query   = input.value.trim().toLowerCase();
+  var labels  = list.querySelectorAll('label');
+  var visible = 0;
+
+  labels.forEach(function (label) {
+    var id      = String(label.getAttribute('data-id') || '');
+    var subject = String(label.getAttribute('data-subject') || '');
+    var matches = !query || id.indexOf(query) > -1 || subject.indexOf(query) > -1;
+    label.style.display = matches ? '' : 'none';
+    if (matches) visible++;
+  });
+
+  if (noMatch) noMatch.classList.toggle('hidden', visible > 0);
+}
+
+// Toggle Redmine task selection via checkbox
+function toggleRedmineTask(idx, taskId, checked) {
+  var allTasks = availableTasks[idx] || [];
+  var task = allTasks.find(function (t) { return t.id === taskId; });
+  if (!task) return;
+  if (checked) {
+    var exists = dayData[idx].redmineTasks.some(function (t) { return t.id === taskId; });
+    if (!exists) dayData[idx].redmineTasks.push(task);
+  } else {
+    dayData[idx].redmineTasks = dayData[idx].redmineTasks.filter(function (t) {
+      return t.id !== taskId;
+    });
+  }
+}
+
+// ── Save day — writes draft to sheet immediately ───────────────
+function saveDay(idx) {
+  var wt = document.getElementById('workType_' + idx);
+  var nt = document.getElementById('notes_' + idx);
+  if (!wt || !nt) return;
+
+  // Update local state first
+  dayData[idx].workType = wt.value;
+  dayData[idx].notes    = nt.value;
+  dayData[idx].edited   = true;
+  dayData[idx].savedStatus = 'draft'; // optimistic — card badge updates immediately
+
+  var offset = parseInt(weekSel.value) || 0;
+  var mon    = getMondayOfWeek(offset);
+  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
+  var date   = new Date(mon); date.setDate(mon.getDate() + idx);
+
+  var payload = {
+    startDate:    isoDate(mon),
+    endDate:      isoDate(fri),
+    date:         isoDate(date),
+    dayShort:     DAY_SHORTS[idx],
+    workType:     dayData[idx].workType,
+    notes:        dayData[idx].notes,
+    redmineTasks: dayData[idx].redmineTasks || [],
+  };
+
+  // Re-render cards immediately (optimistic badge update)
+  renderWeek();
+  // Re-open detail panel so user sees their form + message
+  openDetailPanel(date, DAY_SHORTS[idx], idx, _findWeekReport());
+  showDayMsg(idx, '保存中...', true);
+
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.error) {
+        // Revert optimistic status on error
+        dayData[idx].savedStatus = null;
+        dayData[idx].edited = false;
+        renderWeek();
+        openDetailPanel(date, DAY_SHORTS[idx], idx, _findWeekReport());
+        showDayMsg(idx, r.error, false);
+        return;
+      }
+      showDayMsg(idx, '💾 下書き保存しました (ステータス: 作製中)', true);
+      
+      // Fetch latest data from server to sync
+      google.script.run
+        .withSuccessHandler(function (data) {
+          if (data && !data.error) {
+            myReports = data;
+            renderWeek();
+            // Re-open detail panel if this day is still selected
+            if (selectedDayIdx === idx) {
+              openDetailPanel(date, DAY_SHORTS[idx], idx, _findWeekReport());
+            }
+          }
+        })
+        .getMyReports();
+    })
+    .withFailureHandler(function () {
+      dayData[idx].savedStatus = null;
+      dayData[idx].edited = false;
+      renderWeek();
+      openDetailPanel(date, DAY_SHORTS[idx], idx, _findWeekReport());
+      showDayMsg(idx, '保存に失敗しました', false);
+    })
+    .saveDayDraft(payload);
+}
+
+function cancelDay(idx) {
+  selectedDayIdx = null;
+  document.getElementById('detailDateLabel').textContent = '日を選択してください';
+  document.getElementById('detailPanel').innerHTML =
+    '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
+  renderWeek();
+}
+
+function showDayMsg(idx, msg, ok) {
+  var el = document.getElementById('dayMsg_' + idx);
+  if (!el) return;
+  el.textContent = msg;
+  el.className   = 'mt-3 text-sm text-center p-2 rounded-md ' +
+    (ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
+  el.classList.remove('hidden');
+  setTimeout(function () { el.classList.add('hidden'); }, 2500);
+}
+
+// ── Helper to find current week's report from myReports ───────
+function _findWeekReport() {
+  var offset = parseInt(weekSel.value) || 0;
+  var mon    = getMondayOfWeek(offset);
+  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
+  var monStr = isoDate(mon);
+  var friStr = isoDate(fri);
+  for (var r = 0; r < myReports.length; r++) {
+    if (myReports[r].start_date === monStr && myReports[r].end_date === friStr) {
+      return myReports[r];
+    }
+  }
+  return null;
+}
+
+// ── Sync Redmine tasks ────────────────────────────────────────
+function syncRedmine(idx) {
+  var btn = document.getElementById('syncBtn_' + idx);
+  if (!btn) return;
+  btn.textContent = '同期中...';
+  btn.disabled    = true;
+  google.script.run
+    .withSuccessHandler(function (result) {
+      var msgEl = document.getElementById('redmineList_' + idx);
+
+      // Server returned an error object (e.g. user not in Redmine)
+      if (result && !Array.isArray(result) && result.error) {
+        if (msgEl) {
+          msgEl.innerHTML =
+            '<p class="text-xs text-red-600 italic">' + escapeHtml(result.error) + '</p>';
+        }
+        btn.textContent = 'Redmineと同期';
+        btn.disabled    = false;
+        return;
+      }
+
+      var tasks = Array.isArray(result) ? result : [];
+      availableTasks[idx] = tasks;
+
+      if (tasks.length === 0) {
+        if (msgEl) {
+          msgEl.innerHTML =
+            '<p class="text-xs text-slate-500 italic">オープンなRedmineタスクが見つかりません</p>';
+        }
+        btn.textContent = 'Redmineと同期';
+        btn.disabled    = false;
+        return;
+      }
+      renderRedmineTasks(idx, tasks, false);
+      btn.textContent = 'Redmineタスクを再読み込み';
+      btn.disabled    = false;
+    })
+    .withFailureHandler(function (err) {
+      var msgEl = document.getElementById('redmineList_' + idx);
+      if (msgEl) {
+        msgEl.innerHTML =
+          '<p class="text-xs text-red-600 italic">同期エラー: ' +
+          escapeHtml(String(err && err.message ? err.message : '不明なエラー')) + '</p>';
+      }
+      btn.textContent = 'Redmineと同期';
+      btn.disabled    = false;
+    })
+    .getRedmineTasks();
+}
+
+function submitWeek() {
+  var offset = parseInt(weekSel.value) || 0;
+  var mon    = getMondayOfWeek(offset);
+  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
+
+  // Check if any days have been saved as drafts
+  var hasDrafts = false;
+  for (var c = 0; c < 5; c++) {
+    if (dayData[c].edited && dayData[c].savedStatus === 'draft') { hasDrafts = true; break; }
+  }
+  if (!hasDrafts) {
+    alert('申請する日がありません。\n\n先に「保存」ボタンで日ごとに下書き保存してください。');
+    return;
+  }
+
+  var days = dayData.map(function (d, i) {
+    var date = new Date(mon); date.setDate(mon.getDate() + i);
+    return {
+      date:         isoDate(date),
+      dayShort:     DAY_SHORTS[i],
+      workType:     d.workType,
+      notes:        d.notes,
+      redmineTasks: d.redmineTasks,
+      edited:       !!d.edited,
+    };
+  });
+
+  var weekPayload = {
+    startDate: isoDate(mon),
+    endDate:   isoDate(fri),
+    days:      days,
+  };
+
+  // Optimistically update draft → submitted BEFORE server call
+  var prevStatuses = [];
+  for (var j = 0; j < 5; j++) {
+    prevStatuses[j] = dayData[j].savedStatus;
+    if (dayData[j].edited && dayData[j].savedStatus === 'draft') {
+      dayData[j].savedStatus = 'submitted';
+    }
+  }
+  renderWeek();
+
+  var btn = document.getElementById('submitWeekBtn');
+  btn.innerHTML  = '申請中...';
+  btn.disabled   = true;
+
+  google.script.run
+    .withSuccessHandler(function (r) {
+      btn.innerHTML = '申請 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>';
+      btn.disabled  = false;
+      if (r && r.error) {
+        // Revert optimistic status on error
+        for (var rv = 0; rv < 5; rv++) { dayData[rv].savedStatus = prevStatuses[rv]; }
+        renderWeek();
+        alert('エラー: ' + r.error);
+        return;
+      }
+      
+      var count = (r.reports && r.reports.length) ? r.reports.length : 0;
+      if (count > 0) {
+        alert('✅ ' + count + '日分の申請を送信しました\n\nステータス: 申請中 (承認待ち)');
+      }
+      
+      // Fetch latest data from server to sync
+      google.script.run
+        .withSuccessHandler(function (data) {
+          if (data && !data.error) {
+            myReports = data;
+            renderWeek();
+          }
+        })
+        .getMyReports();
+    })
+    .withFailureHandler(function () {
+      // Revert optimistic status on failure
+      for (var rv = 0; rv < 5; rv++) { dayData[rv].savedStatus = prevStatuses[rv]; }
+      renderWeek();
+      btn.innerHTML = '申請 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>';
+      btn.disabled  = false;
+      alert('申請に失敗しました。もう一度お試しください。');
+    })
+    .submitWeekReport(weekPayload);
+}
+
+// ── Logout ────────────────────────────────────────────────────
+function logout() {
+  google.script.run
+    .withSuccessHandler(function (r) { window.location.replace(r.redirectUrl); })
+    .logoutUser();
+}
+</script>
+</body>
+</html>
