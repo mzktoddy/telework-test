@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>テレワーク・プロ | 管理者画面</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 h-screen flex overflow-hidden">
+
+<!-- Page loader -->
+<div id="pageLoader" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center">
+  <div class="flex flex-col items-center gap-3">
+    <div class="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+    <p class="text-white text-sm font-medium">読み込み中...</p>
+  </div>
+</div>
+
+<!-- GAS template vars -->
+<div id="gasVars" data-user='<?!= user ?>' data-url="<?= scriptUrl ?>" style="display:none"></div>
+
+<!-- ═══════════════════════════ SIDEBAR ═══════════════════════════ -->
+<aside class="flex flex-col h-screen w-64 bg-slate-900 text-white overflow-y-auto flex-shrink-0">
+  <div class="p-6 border-b border-slate-700">
+    <div class="flex items-center justify-center gap-3">
+      <div class="bg-blue-100 rounded-md text-sm font-bold">
+        <img src="" id="logoImg" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
+      </div>
+      <div>
+        <p class="text-sm font-semibold">マミヤ</p>
+        <p class="text-xs text-slate-400">ITソリューションズ</p>
+      </div>
+    </div>
+  </div>
+  <nav class="flex-1 px-3 py-6 space-y-1" id="sidebarNav"></nav>
+  <div class="px-3 pb-6 border-t border-slate-700 pt-4 space-y-1">
+    <div class="px-4 py-2">
+      <p class="text-sm font-medium text-white" id="sidebarName"></p>
+      <p class="text-xs text-slate-400" id="sidebarEmail"></p>
+    </div>
+    <button onclick="logout()"
+      class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium
+             text-rose-400 hover:bg-slate-800 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
+      </svg>
+      ログアウト
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════ MAIN ══════════════════════════════ -->
+<main class="flex-1 overflow-y-auto p-8">
+
+  <!-- Header -->
+  <div class="mb-6 flex items-start justify-between">
+    <div>
+      <h1 class="text-3xl font-bold text-slate-900 mb-1">管理者画面</h1>
+      <p class="text-sm text-slate-500">全従業員の「申請履歴」と「日報報告」の管理が行えます。</p>
+    </div>
+    <div class="flex gap-3">
+      <button onclick="bulkDelete()"
+        class="flex items-center gap-2 h-10 px-5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+        </svg>
+        表示中の一括削除
+      </button>
+      <button onclick="exportToSheet()"
+        class="flex items-center gap-2 h-10 px-5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        スプレッドシートへ書き込み
+      </button>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex gap-2 mb-6">
+    <button id="tabTelework" onclick="switchTab('telework')"
+      class="px-5 py-2 text-sm font-medium rounded-full border transition-colors bg-slate-900 text-white border-slate-900">
+      在宅勤務 申請一覧
+    </button>
+    <button id="tabTask" onclick="switchTab('task')"
+      class="px-5 py-2 text-sm font-medium rounded-full border transition-colors text-slate-500 border-slate-300 hover:bg-slate-50">
+      日報報告 一覧
+    </button>
+  </div>
+
+  <!-- Filters -->
+  <div class="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex items-center gap-4">
+    <div class="relative flex-1 max-w-xs">
+      <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+      <input id="searchName" type="text" placeholder="従業員名で検索..."
+        oninput="applyFilters()"
+        class="w-full pl-10 pr-3 h-9 border border-slate-300 rounded-lg text-sm
+               focus:outline-none focus:ring-2 focus:ring-blue-300" />
+    </div>
+    <select id="weekFilter" onchange="applyFilters()"
+      class="h-9 px-3 min-w-[280px] border border-slate-300 rounded-lg text-sm
+             focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-700">
+      <option value="">全期間</option>
+    </select>
+  </div>
+
+  <!-- States: loading / empty / table -->
+  <div id="tableLoading" class="text-center py-16 text-slate-400 text-sm">読み込み中...</div>
+  <div id="tableEmpty" class="hidden text-center py-16 text-slate-400 text-sm">条件に一致するデータがありません</div>
+
+  <div id="tableWrap" class="hidden bg-white rounded-xl border border-slate-200 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead>
+          <tr id="tableHeadRow" class="border-b border-slate-200 bg-slate-50"></tr>
+        </thead>
+        <tbody id="tableBody" class="divide-y divide-slate-100"></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<!-- ════════════════════════ DETAIL MODAL ════════════════════════ -->
+<div id="detailModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+    <div class="p-6 border-b border-slate-100 flex items-center justify-between">
+      <h3 class="text-lg font-semibold text-slate-900" id="modalTitle">詳細</h3>
+      <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto p-6" id="modalBody"></div>
+    <div class="p-4 border-t border-slate-100 flex justify-end">
+      <button onclick="closeModal()"
+        class="h-9 px-5 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50">
+        閉じる
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════ TOAST ════════════════════════ -->
+<div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg text-sm font-medium text-white shadow-lg"></div>
+
+<script>
+var _gasEl     = document.getElementById('gasVars');
+var APP_USER   = JSON.parse(_gasEl.getAttribute('data-user') || 'null');
+var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
+
+// ── Sidebar ───────────────────────────────────────────────────
+(function buildSidebar() {
+  if (!APP_USER) return;
+  document.getElementById('sidebarName').textContent  = APP_USER.name;
+  document.getElementById('sidebarEmail').textContent = APP_USER.email;
+
+  var items = [
+    {
+      label: '在宅勤務許可申請', page: 'reports', color: 'text-emerald-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    },
+    {
+      label: '日報報告', page: 'task_report', color: 'text-orange-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/>',
+    },
+    {
+      label: 'チームカレンダー', page: 'calendar', color: 'text-violet-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>',
+    },
+    {
+      label: '申請承認', page: 'approve', color: 'text-emerald-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    },
+    {
+      label: '社員マスタ管理', page: 'employees', color: 'text-pink-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>',
+    },
+    {
+      label: '申請履歴', page: 'admin_history', color: 'text-red-400', active: true,
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>',
+    },
+  ];
+
+  var nav = document.getElementById('sidebarNav');
+  items.forEach(function (item) {
+    var a = document.createElement('a');
+    a.href = SCRIPT_URL + '?page=' + item.page;
+    a.className = [
+      'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
+      item.active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+    ].join(' ');
+    a.innerHTML =
+      '<svg class="w-4 h-4 flex-shrink-0 ' + (item.active ? 'text-white' : item.color) + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+      item.icon + '</svg>' + item.label;
+    if (!item.active) {
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        document.getElementById('pageLoader').classList.remove('hidden');
+        window.top.location.href = SCRIPT_URL + '?page=' + item.page;
+      });
+    }
+    nav.appendChild(a);
+  });
+})();
+
+// ── Load logo ─────────────────────────────────────────────────
+var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D';
+google.script.run
+  .withSuccessHandler(function (b) { if (b) document.getElementById('logoImg').src = b; })
+  .withFailureHandler(function () {})
+  .getImageAsBase64(logoFileId);
+
+// ── Logout ─────────────────────────────────────────────────────
+function logout() {
+  google.script.run
+    .withSuccessHandler(function () { window.top.location.href = SCRIPT_URL + '?page=login'; })
+    .withFailureHandler(function () { window.top.location.href = SCRIPT_URL + '?page=login'; })
+    .logoutUser();
+}
+
+// ── State ─────────────────────────────────────────────────────
+var _activeTab    = 'telework';
+var _teleData     = [];
+var _taskData     = [];
+var _filteredRows = [];
+var _teleLoaded   = false;
+var _taskLoaded   = false;
+
+// ── Utilities ─────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function statusBadge(status) {
+  var MAP = {
+    approved:          ['承認済み', 'bg-green-100 text-green-700'],
+    submitted:         ['申請中',   'bg-orange-100 text-orange-700'],
+    draft:             ['未作成',   'bg-slate-100 text-slate-500'],
+    rejected:          ['差戻し',     'bg-red-100 text-red-700'],
+    reviewer_approved: ['審査承認', 'bg-blue-100 text-blue-700'],
+  };
+  var info = MAP[status] || [status || '‐', 'bg-slate-100 text-slate-500'];
+  return '<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ' +
+    info[1] + '">' + info[0] + '</span>';
+}
+
+function statusLabel(status) {
+  var MAP = {
+    approved:          '承認済み',
+    submitted:         '申請中',
+    draft:             '未作成',
+    rejected:          '差戻し',
+    reviewer_approved: '審査承認',
+  };
+  return MAP[status] || status || '';
+}
+
+function getISOWeekLabel(dateStr) {
+  if (!dateStr) return '';
+  var d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  var utcD = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  var day = utcD.getUTCDay() || 7;
+  utcD.setUTCDate(utcD.getUTCDate() + 4 - day);
+  var yearStart = new Date(Date.UTC(utcD.getUTCFullYear(), 0, 1));
+  var wk = Math.ceil(((utcD - yearStart) / 86400000 + 1) / 7);
+  return '第' + wk + '週 ' + utcD.getUTCFullYear();
+}
+
+function getMondayKey(dateStr) {
+  if (!dateStr) return null;
+  var d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  var dow = d.getDay() === 0 ? 6 : d.getDay() - 1; // 0=Mon … 6=Sun
+  var mon = new Date(d);
+  mon.setDate(d.getDate() - dow);
+  return mon.getFullYear() + '-' +
+    String(mon.getMonth() + 1).padStart(2, '0') + '-' +
+    String(mon.getDate()).padStart(2, '0');
+}
+
+function fmtDateShort(dateStr) {
+  if (!dateStr) return '';
+  var d = new Date(dateStr);
+  if (isNaN(d.getTime())) return String(dateStr);
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+function showToast(msg, isError) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className =
+    'fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg text-sm font-medium text-white shadow-lg ' +
+    (isError ? 'bg-red-600' : 'bg-green-600');
+  el.classList.remove('hidden');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(function () { el.classList.add('hidden'); }, 3500);
+}
+
+function thCell(label) {
+  return '<th class="px-6 py-3 text-left text-sm font-semibold text-slate-700">' + label + '</th>';
+}
+function tdCell(html) {
+  return '<td class="px-6 py-4">' + html + '</td>';
+}
+
+function actionBtns(id, type) {
+  return '<span class="flex items-center justify-end gap-3">' +
+    '<button onclick="openDetail(\'' + id + '\',\'' + type + '\')" ' +
+    'class="text-blue-600 hover:text-blue-800 text-sm font-medium transition-colors">明細</button>' +
+    '<button onclick="deleteOne(\'' + id + '\',\'' + type + '\')" ' +
+    'class="flex items-center gap-1 text-red-500 hover:text-red-700 text-sm font-medium transition-colors">' +
+    '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+    '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" ' +
+    'd="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>' +
+    '削除</button></span>';
+}
+
+// ── Load data from server ─────────────────────────────────────
+google.script.run
+  .withSuccessHandler(function (data) {
+    _teleData = Array.isArray(data) ? data : [];
+    _teleLoaded = true;
+    _checkReady();
+  })
+  .withFailureHandler(function (err) {
+    _teleLoaded = true;
+    _checkReady();
+    showToast('在宅勤務データの読み込みに失敗しました', true);
+  })
+  .getAdminTeleworkReports();
+
+google.script.run
+  .withSuccessHandler(function (data) {
+    _taskData = Array.isArray(data) ? data : [];
+    _taskLoaded = true;
+    _checkReady();
+  })
+  .withFailureHandler(function (err) {
+    _taskLoaded = true;
+    _checkReady();
+    showToast('日報データの読み込みに失敗しました', true);
+  })
+  .getAdminTaskReports();
+
+function _checkReady() {
+  if (!_teleLoaded || !_taskLoaded) return;
+  document.getElementById('tableLoading').classList.add('hidden');
+  switchTab('telework');
+}
+
+// ── Tab switching ─────────────────────────────────────────────
+function switchTab(tab) {
+  _activeTab = tab;
+  var activeClass   = 'px-5 py-2 text-sm font-medium rounded-full border transition-colors bg-slate-900 text-white border-slate-900';
+  var inactiveClass = 'px-5 py-2 text-sm font-medium rounded-full border transition-colors text-slate-500 border-slate-300 hover:bg-slate-50';
+  document.getElementById('tabTelework').className = tab === 'telework' ? activeClass : inactiveClass;
+  document.getElementById('tabTask').className     = tab === 'task'     ? activeClass : inactiveClass;
+  document.getElementById('searchName').value = '';
+  buildWeekOptions();
+  applyFilters();
+}
+
+// ── Build week dropdown dynamically from data ─────────────────
+function buildWeekOptions() {
+  var data  = _activeTab === 'telework' ? _teleData : _taskData;
+  var seen  = {};
+  var weeks = [];
+
+  data.forEach(function (r) {
+    var dateStr = _activeTab === 'telework' ? r.request_date : r.report_date;
+    var monKey  = getMondayKey(dateStr);
+    if (!monKey || seen[monKey]) return;
+    seen[monKey] = true;
+
+    var mon = new Date(monKey);
+    var sat = new Date(mon);
+    sat.setDate(mon.getDate() + 5);
+
+    var weekTitlePart = (_activeTab === 'telework' && r.week_title)
+      ? r.week_title
+      : getISOWeekLabel(dateStr).split(' ')[0];
+
+    var rangeStr = fmtDateShort(mon) + '（月）〜' + fmtDateShort(sat);
+    weeks.push({ key: monKey, label: weekTitlePart + ' ' + rangeStr, ts: mon.getTime() });
+  });
+
+  weeks.sort(function (a, b) { return b.ts - a.ts; });
+
+  var sel = document.getElementById('weekFilter');
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">全期間</option>';
+  weeks.forEach(function (w) {
+    var opt = document.createElement('option');
+    opt.value = w.key;
+    opt.textContent = w.label;
+    if (w.key === cur) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+// ── Apply filters ─────────────────────────────────────────────
+function applyFilters() {
+  var name    = document.getElementById('searchName').value.trim().toLowerCase();
+  var weekKey = document.getElementById('weekFilter').value;
+  var data    = _activeTab === 'telework' ? _teleData : _taskData;
+
+  _filteredRows = data.filter(function (r) {
+    if (name && r.employee_name.toLowerCase().indexOf(name) === -1) return false;
+    if (weekKey) {
+      var dateStr = _activeTab === 'telework' ? r.request_date : r.report_date;
+      if (getMondayKey(dateStr) !== weekKey) return false;
+    }
+    return true;
+  });
+
+  renderTable();
+}
+
+// ── Render table ──────────────────────────────────────────────
+function renderTable() {
+  var wrap  = document.getElementById('tableWrap');
+  var empty = document.getElementById('tableEmpty');
+  var head  = document.getElementById('tableHeadRow');
+  var body  = document.getElementById('tableBody');
+
+  if (_filteredRows.length === 0) {
+    wrap.classList.add('hidden');
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  wrap.classList.remove('hidden');
+
+  if (_activeTab === 'telework') {
+    head.innerHTML =
+      thCell('従業員名') + thCell('対象日') + thCell('種類') +
+      thCell('ステータス') + thCell('内容（抜粋）') +
+      '<th class="px-6 py-3 text-right text-sm font-semibold text-slate-700">操作</th>';
+  } else {
+    head.innerHTML =
+      thCell('従業員名') + thCell('対象日') +
+      thCell('ステータス') + thCell('重要事項（抜粋）') +
+      '<th class="px-6 py-3 text-right text-sm font-semibold text-slate-700">操作</th>';
+  }
+
+  body.innerHTML = '';
+  _filteredRows.forEach(function (r) {
+    var tr = document.createElement('tr');
+    tr.id = 'row-' + r.id;
+    tr.className = 'hover:bg-slate-50 transition-colors';
+
+    if (_activeTab === 'telework') {
+      var dayDisp  = escHtml(r.request_date || '‐') + (r.day_short ? ' (' + escHtml(r.day_short) + ')' : '');
+      var excerpt  = r.notes
+        ? escHtml(r.notes.substring(0, 35)) + (r.notes.length > 35 ? '...' : '')
+        : '‐';
+      tr.innerHTML =
+        tdCell('<span class="font-medium text-slate-900">' + escHtml(r.employee_name) + '</span>') +
+        tdCell('<span class="text-slate-600 text-sm">' + dayDisp + '</span>') +
+        tdCell('<span class="text-slate-600 text-sm">' + escHtml(r.work_type || '‐') + '</span>') +
+        tdCell(statusBadge(r.status)) +
+        tdCell('<span class="text-slate-500 text-sm">' + excerpt + '</span>') +
+        '<td class="px-6 py-4">' + actionBtns(r.id, 'telework') + '</td>';
+    } else {
+      var dayDispTask  = escHtml(r.report_date || '‐') + (r.day_short ? ' (' + escHtml(r.day_short) + ')' : '');
+      var taskExcerpt  = r.important_issues
+        ? escHtml(r.important_issues.substring(0, 35)) + (r.important_issues.length > 35 ? '...' : '')
+        : '‐';
+      tr.innerHTML =
+        tdCell('<span class="font-medium text-slate-900">' + escHtml(r.employee_name) + '</span>') +
+        tdCell('<span class="text-slate-600 text-sm">' + dayDispTask + '</span>') +
+        tdCell(statusBadge(r.status)) +
+        tdCell('<span class="text-slate-500 text-sm">' + taskExcerpt + '</span>') +
+        '<td class="px-6 py-4">' + actionBtns(r.id, 'task') + '</td>';
+    }
+    body.appendChild(tr);
+  });
+}
+
+// ── Delete single record ──────────────────────────────────────
+function deleteOne(id, type) {
+  if (!window.confirm('このレコードを削除しますか？')) return;
+  var row = document.getElementById('row-' + id);
+  if (row) row.style.opacity = '0.4';
+
+  var fn = type === 'telework' ? 'adminDeleteTeleworkReport' : 'adminDeleteTaskReport';
+  google.script.run
+    .withSuccessHandler(function (ok) {
+      if (ok) {
+        if (type === 'telework') {
+          _teleData = _teleData.filter(function (r) { return r.id !== id; });
+        } else {
+          _taskData = _taskData.filter(function (r) { return r.id !== id; });
+        }
+        buildWeekOptions();
+        applyFilters();
+        showToast('削除しました');
+      } else {
+        if (row) row.style.opacity = '1';
+        showToast('削除に失敗しました', true);
+      }
+    })
+    .withFailureHandler(function (err) {
+      if (row) row.style.opacity = '1';
+      showToast('エラー: ' + ((err && err.message) || '不明'), true);
+    })
+    [fn](id);
+}
+
+// ── Bulk delete ───────────────────────────────────────────────
+function bulkDelete() {
+  if (_filteredRows.length === 0) {
+    showToast('削除する対象がありません', true);
+    return;
+  }
+  if (!window.confirm('表示中の ' + _filteredRows.length + ' 件を削除しますか？\nこの操作は取り消せません。')) return;
+
+  var ids  = _filteredRows.map(function (r) { return r.id; });
+  var type = _activeTab;
+  var fn   = type === 'telework' ? 'adminDeleteTeleworkReport' : 'adminDeleteTaskReport';
+  document.getElementById('pageLoader').classList.remove('hidden');
+
+  var pending = ids.length;
+  var failed  = 0;
+  ids.forEach(function (id) {
+    google.script.run
+      .withSuccessHandler(function () {
+        pending--;
+        if (pending === 0) _afterBulkDelete(ids, type, failed);
+      })
+      .withFailureHandler(function () {
+        pending--;
+        failed++;
+        if (pending === 0) _afterBulkDelete(ids, type, failed);
+      })
+      [fn](id);
+  });
+}
+
+function _afterBulkDelete(ids, type, failed) {
+  document.getElementById('pageLoader').classList.add('hidden');
+  var idSet = {};
+  ids.forEach(function (id) { idSet[id] = true; });
+  if (type === 'telework') {
+    _teleData = _teleData.filter(function (r) { return !idSet[r.id]; });
+  } else {
+    _taskData = _taskData.filter(function (r) { return !idSet[r.id]; });
+  }
+  buildWeekOptions();
+  applyFilters();
+  var done = ids.length - failed;
+  showToast(failed > 0 ? done + '件削除しました（' + failed + '件失敗）' : done + '件削除しました', failed > 0);
+}
+
+// ── Export to spreadsheet ─────────────────────────────────────
+function exportToSheet() {
+  if (_filteredRows.length === 0) {
+    showToast('エクスポートする対象がありません', true);
+    return;
+  }
+  var now   = new Date();
+  var stamp = now.getFullYear() +
+    ('0' + (now.getMonth() + 1)).slice(-2) +
+    ('0' + now.getDate()).slice(-2) + '_' +
+    ('0' + now.getHours()).slice(-2) +
+    ('0' + now.getMinutes()).slice(-2);
+
+  var title, rows;
+  if (_activeTab === 'telework') {
+    title = '在宅勤務申請_' + stamp;
+    rows = _filteredRows.map(function (r) {
+      return {
+        従業員名:   r.employee_name,
+        部署:       r.department,
+        対象日:     r.request_date,
+        曜日:       r.day_short,
+        週:         r.week_title,
+        勤務種別:   r.work_type,
+        内容:       r.notes,
+        ステータス: statusLabel(r.status),
+        作成日時:   r.created_at,
+      };
+    });
+  } else {
+    title = '日報報告_' + stamp;
+    rows = _filteredRows.map(function (r) {
+      return {
+        従業員名:   r.employee_name,
+        部署:       r.department,
+        対象日:     r.report_date,
+        曜日:       r.day_short,
+        重要事項:   r.important_issues,
+        翌日の計画: r.next_day_plan,
+        ステータス: statusLabel(r.status),
+        作成日時:   r.created_at,
+      };
+    });
+  }
+
+  document.getElementById('pageLoader').classList.remove('hidden');
+  google.script.run
+    .withSuccessHandler(function (res) {
+      document.getElementById('pageLoader').classList.add('hidden');
+      if (res && res.success) {
+        showToast('「' + res.sheetName + '」に ' + rows.length + '件書き込みました');
+      } else {
+        showToast((res && res.error) ? res.error : 'エクスポートに失敗しました', true);
+      }
+    })
+    .withFailureHandler(function (err) {
+      document.getElementById('pageLoader').classList.add('hidden');
+      showToast('エラー: ' + ((err && err.message) || '不明'), true);
+    })
+    .adminExportToSheet(rows, title);
+}
+
+// ── Redmine official logo SVG (inline) ───────────────────────
+var REDMINE_ICON =
+  '<svg class="w-4 h-4 flex-shrink-0" viewBox="5.57 182.54 989.43 682.93" xmlns="http://www.w3.org/2000/svg" style="transform: rotate(180deg)">' +
+    '<path fill="#d52c24" fill-rule="nonzero" d="m297.932983,754.697327l94.921478,-112.637756c4.070251,-5.356079 -1.323608,-9.318115 -1.323608,-9.318115c-38.036346,-20.90564 -65.558197,-52.496582 -89.100891,-88.672119c-4.674866,-7.17749 -9.716095,-1.963806 -9.716095,-1.963806l-120.275864,91.781738c0,0 -5.17041,3.097839 -0.644852,9.22229c35.218735,47.657104 67.212173,81.266846 118.368866,112.995789c0,0 3.875427,3.721558 7.770966,-1.40802"/>' +
+    '<path fill="#c82624" fill-rule="nonzero" d="m129.558426,571.200745l142.147659,-70.021576c6.754456,-2.668335 3.374603,-8.93515 3.374603,-8.93515c-19.637634,-47.623718 -31.603806,-87.829376 -40.835999,-136.544037c-1.546982,-8.156067 -6.977859,-5.542755 -6.977859,-5.542755l-159.891731,70.746643c0,0 -4.79388,1.828888 -2.792,8.10434c7.097748,22.288879 43.264374,111.264069 57.782486,140.34201c0,0 2.543396,4.408875 7.192841,1.850525"/>' +
+    '<path fill="#ac1f22" fill-rule="nonzero" d="m50.023781,346.267395c32.514511,-10.204071 168.945808,-42.224426 168.945808,-42.224426c8.177597,-2.566925 5.741135,-8.817566 5.741135,-8.817566c-9.414307,-75.529892 -7.370712,-133.172134 -7.370712,-153.087189c0,-8.829453 -6.307632,-7.531418 -6.307632,-7.531418c-35.417801,0 -199.098537,0 -199.098537,0c-8.652871,0 -6.754372,7.944672 -6.754372,7.944672c1.625522,25.157928 8.743865,96.751602 36.195668,199.391281c0,0 1.364868,6.613159 8.648659,4.324646"/>' +
+    '<path fill="#d52c24" fill-rule="nonzero" d="m701.495056,754.697327l-94.916138,-112.637756c-4.070251,-5.356079 1.323547,-9.318115 1.323547,-9.318115c38.036377,-20.90564 65.558289,-52.496582 89.101013,-88.672119c4.673767,-7.17749 9.715942,-1.963806 9.715942,-1.963806l120.275879,91.781738c0,0 5.170471,3.097839 0.644897,9.22229c-35.219788,47.657104 -67.212158,81.266846 -118.368835,112.995789c0,0 -3.875427,3.721558 -7.776245,-1.40802"/>' +
+    '<path fill="#df3d3c" fill-rule="nonzero" d="m499.720886,658.287842c15.973938,0 45.555298,-1.55603 59.519592,-3.915771c7.291199,-1.231079 9.095642,3.679382 9.095642,3.679382l59.746094,127.229004c0,0 4.000366,4.787598 -4.367798,7.906921c-44.596008,16.627319 -68.316467,24.277466 -123.99353,24.277466c-55.019379,0 -79.406006,-7.650146 -124.007233,-24.277466c-8.362885,-3.119324 -4.367798,-7.906921 -4.367798,-7.906921l59.747192,-127.229004c0,0 1.803253,-4.910461 9.099854,-3.679382c13.959961,2.359741 43.545563,3.915771 59.527985,3.915771"/>' +
+    '<path fill="#c82624" fill-rule="nonzero" d="m869.874878,571.200745l-142.147644,-70.021576c-6.754517,-2.668396 -3.379883,-8.93515 -3.379883,-8.93515c19.643005,-47.62381 31.60907,-87.829376 40.84137,-136.544037c1.546936,-8.156128 6.973572,-5.542816 6.973572,-5.542816l159.895203,70.746704c0,0 4.794556,1.828888 2.792297,8.10434c-7.101868,22.288879 -43.263977,111.26413 -57.782043,140.34201c0,0 -2.543396,4.408875 -7.19281,1.850525"/>' +
+    '<path fill="#ac1f22" fill-rule="nonzero" d="m949.408936,346.267395c-32.518555,-10.204071 -168.946228,-42.224426 -168.946228,-42.224426c-8.176575,-2.566925 -5.740173,-8.817566 -5.740173,-8.817566c9.413269,-75.529892 7.366577,-133.172134 7.366577,-153.087189c0,-8.829453 6.307556,-7.531418 6.307556,-7.531418c35.422058,0 199.102722,0 199.102722,0c8.652954,0 6.754395,7.944672 6.754395,7.944672c-1.625366,25.157928 -8.74823,96.751602 -36.196045,199.391281c0,0 -1.364868,6.613159 -8.648804,4.324646"/>' +
+  '</svg>';
+
+// ── Detail modal ──────────────────────────────────────────────
+function openDetail(id, type) {
+  var d = (type === 'telework' ? _teleData : _taskData).find(function (x) { return x.id === id; });
+  if (!d) return;
+
+  var tasks = [];
+  try { tasks = JSON.parse(d.redmine_tasks || '[]'); } catch (e) {}
+
+  // ── Task report (日報) detail — two-column card design ──────
+  if (type === 'task') {
+    document.getElementById('modalTitle').textContent = '日報報告 詳細';
+
+    // Format readable date title
+    var dayNamesJa = ['日', '月', '火', '水', '木', '金', '土'];
+    var dateObj = d.report_date ? new Date(d.report_date) : null;
+    var dateTitle = (dateObj && !isNaN(dateObj.getTime()))
+      ? (dateObj.getMonth() + 1) + '月' + dateObj.getDate() + '日（' + dayNamesJa[dateObj.getDay()] + '）の日報'
+      : escHtml(d.report_date || '‐') + ' の日報';
+    var submittedAt = d.created_at
+      ? escHtml(String(d.created_at).replace('T', ' ').substring(0, 16))
+      : '‐';
+
+    // Redmine task cards
+    var redmineCardsHtml = '';
+    if (tasks.length > 0) {
+      redmineCardsHtml = tasks.map(function (t) {
+        var hoursHtml = (t.hours !== undefined && t.hours !== '')
+          ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-xs">' +
+              '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
+              '</svg>' + escHtml(String(t.hours)) + 'h</span>'
+          : '';
+        var progressHtml = (t.progress !== undefined && t.progress !== '')
+          ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded-md text-xs">' +
+              '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
+              '</svg>' + escHtml(String(t.progress)) + '%</span>'
+          : '';
+        var rawComments = t.comments || t.comment || '';
+        var commentsText = Array.isArray(rawComments) ? rawComments.join(', ') : String(rawComments);
+        var commentHtml = commentsText.trim()
+          ? '<p class="flex items-start gap-1.5 mt-2 text-xs text-slate-400 leading-snug">' +
+              '<svg class="w-3 h-3 flex-shrink-0 mt-0.5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>' +
+              '</svg>' + escHtml(commentsText) + '</p>'
+          : '';
+        return '<div class="py-3 border-b border-slate-100 last:border-0">' +
+          '<div class="flex items-start gap-2">' +
+            '<span class="text-teal-500 font-bold text-base leading-none mt-0.5 flex-shrink-0">•</span>' +
+            '<div class="flex-1 min-w-0">' +
+              '<p class="text-sm font-medium text-slate-800 leading-snug">' +
+                '<span class="text-slate-400 font-normal">#' + escHtml(String(t.id || '')) + '</span>　' +
+                escHtml(t.subject || t.title || '') +
+              '</p>' +
+              ((hoursHtml || progressHtml)
+                ? '<div class="flex items-center gap-1.5 mt-1.5">' + hoursHtml + progressHtml + '</div>'
+                : '') +
+              commentHtml +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    } else {
+      redmineCardsHtml = '<p class="text-xs text-slate-400 py-3 text-center">Redmineタスクなし</p>';
+    }
+
+    document.getElementById('modalBody').innerHTML =
+      // ── Header card ──────────────────────────────────────────
+      '<div class="rounded-xl border border-slate-200 bg-white p-5 mb-5">' +
+        '<div class="flex items-center justify-between mb-3">' +
+          '<span class="inline-flex items-center px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 text-xs font-medium">' +
+            escHtml(d.department || '未設定') +
+          '</span>' +
+          statusBadge(d.status) +
+        '</div>' +
+        '<div class="flex items-center gap-3 mb-2">' +
+          '<div class="w-10 h-10 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center flex-shrink-0">' +
+            '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+              '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/>' +
+            '</svg>' +
+          '</div>' +
+          '<div>' +
+            '<h3 class="text-xl font-bold text-slate-900 leading-tight">' + dateTitle + '</h3>' +
+            '<p class="text-xs text-slate-400 mt-0.5">提出日: ' + submittedAt + '</p>' +
+          '</div>' +
+        '</div>' +
+        '<p class="text-xs text-slate-500">従業員: <span class="font-semibold text-slate-700">' + escHtml(d.employee_name) + '</span></p>' +
+      '</div>' +
+      // ── Two-column body ───────────────────────────────────────
+      '<div class="grid grid-cols-5 gap-4">' +
+        // Left: content fields
+        '<div class="col-span-2 space-y-4">' +
+          '<p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">本日の業務内容</p>' +
+          '<div class="border-l-4 border-red-400 pl-3 py-0.5">' +
+            '<p class="text-xs font-bold text-slate-700 mb-1">■ 重要課題</p>' +
+            '<p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">' +
+              escHtml(d.important_issues || '特になし') +
+            '</p>' +
+          '</div>' +
+          '<div class="border-l-4 border-blue-400 pl-3 py-0.5">' +
+            '<p class="text-xs font-bold text-slate-700 mb-1">■ 翌営業日の作業予定</p>' +
+            '<p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">' +
+              escHtml(d.next_day_plan || '‐') +
+            '</p>' +
+          '</div>' +
+        '</div>' +
+        // Right: Redmine tasks
+        '<div class="col-span-3">' +
+          '<div class="bg-slate-50 rounded-xl border border-slate-200 p-4 h-full">' +
+            '<div class="flex items-center gap-2 mb-3 pb-2 border-b border-slate-200">' +
+              REDMINE_ICON +
+              '<p class="text-xs font-semibold text-slate-600 uppercase tracking-wider">REDMINE API 実績タスク</p>' +
+            '</div>' +
+            '<div>' + redmineCardsHtml + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+  // ── Telework request detail ──────────────────────────────────
+  } else {
+    document.getElementById('modalTitle').textContent = '在宅勤務申請 詳細';
+
+    var teleworkTasksHtml = tasks.length > 0
+      ? tasks.map(function (t) {
+          var hoursHtml = (t.hours !== undefined && t.hours !== '')
+            ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-xs">' +
+                '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                  '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
+                '</svg>' + escHtml(String(t.hours)) + 'h</span>'
+            : '';
+          var progressHtml = (t.progress !== undefined && t.progress !== '')
+            ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded-md text-xs">' +
+                '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                  '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
+                '</svg>' + escHtml(String(t.progress)) + '%</span>'
+            : '';
+          return '<div class="py-3 border-b border-slate-100 last:border-0">' +
+            '<div class="flex items-start gap-2">' +
+              '<span class="text-teal-500 font-bold text-base leading-none mt-0.5 flex-shrink-0">•</span>' +
+              '<div class="flex-1">' +
+                '<p class="text-sm font-medium text-slate-800">' +
+                  '<span class="text-slate-400 font-normal">#' + escHtml(String(t.id || '')) + '</span>　' +
+                  escHtml(t.subject || t.title || '') +
+                '</p>' +
+                ((hoursHtml || progressHtml)
+                  ? '<div class="flex gap-1.5 mt-1.5">' + hoursHtml + progressHtml + '</div>'
+                  : '') +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('')
+      : '<p class="text-xs text-slate-400 py-2 text-center">Redmineタスクなし</p>';
+
+    document.getElementById('modalBody').innerHTML =
+      // Header
+      '<div class="rounded-xl border border-slate-200 bg-white p-5 mb-5">' +
+        '<div class="flex items-center justify-between mb-3">' +
+          '<div class="flex items-center gap-2">' +
+            '<span class="inline-flex items-center px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 text-xs font-medium">' +
+              escHtml(d.department || '未設定') +
+            '</span>' +
+            '<span class="text-xs text-slate-400">' + escHtml(d.week_title || getISOWeekLabel(d.request_date)) + '</span>' +
+          '</div>' +
+          statusBadge(d.status) +
+        '</div>' +
+        '<div class="flex items-center gap-3 mb-2">' +
+          '<div class="w-10 h-10 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center flex-shrink-0">' +
+            '<svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+              '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>' +
+            '</svg>' +
+          '</div>' +
+          '<div>' +
+            '<h3 class="text-lg font-bold text-slate-900">' +
+              escHtml(d.request_date || '‐') + (d.day_short ? '　(' + escHtml(d.day_short) + ')' : '') +
+              '　在宅勤務申請' +
+            '</h3>' +
+            '<p class="text-xs text-slate-400 mt-0.5">勤務種別: ' + escHtml(d.work_type || '‐') + '</p>' +
+          '</div>' +
+        '</div>' +
+        '<p class="text-xs text-slate-500">従業員: <span class="font-semibold text-slate-700">' + escHtml(d.employee_name) + '</span></p>' +
+      '</div>' +
+      // Content + Redmine two-column
+      '<div class="grid grid-cols-5 gap-4">' +
+        '<div class="col-span-3">' +
+          '<p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">業務内容・メモ</p>' +
+          '<p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-lg p-4 border border-slate-100 min-h-[80px]">' +
+            escHtml(d.notes || '‐') +
+          '</p>' +
+        '</div>' +
+        '<div class="col-span-2">' +
+          '<div class="bg-slate-50 rounded-xl border border-slate-200 p-4 h-full">' +
+            '<div class="flex items-center gap-2 mb-3 pb-2 border-b border-slate-200">' +
+              REDMINE_ICON +
+              '<p class="text-xs font-semibold text-slate-600 uppercase tracking-wider">REDMINE API 実績タスク</p>' +
+            '</div>' +
+            '<div>' + teleworkTasksHtml + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  document.getElementById('detailModal').classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('detailModal').classList.add('hidden');
+}
+
+document.getElementById('detailModal').addEventListener('click', function (e) {
+  if (e.target === this) closeModal();
+});
+</script>
+</body>
+</html>

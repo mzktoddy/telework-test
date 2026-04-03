@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>テレワーク・プロ | 日報報告</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 h-screen flex overflow-hidden">
+<!-- Loading overlay -->
+<div id="pageLoader" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center">
+  <div class="flex flex-col items-center gap-3">
+    <div class="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+    <p class="text-white text-sm font-medium">読み込み中...</p>
+  </div>
+</div>
+<!-- GAS template vars -->
+<div id="gasVars" data-user='<?!= user ?>' data-url="<?= scriptUrl ?>" style="display:none"></div>
+
+<!-- ═══════════════════════════ SIDEBAR ═══════════════════════════ -->
+<aside class="flex flex-col h-screen w-64 bg-slate-900 text-white overflow-y-auto flex-shrink-0">
+  <div class="p-6 border-b border-slate-700">
+    <div class="flex items-center justify-center gap-3">
+      <div class="bg-blue-100 rounded-md text-sm font-bold">
+        <img src="" id="logoImg" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
+      </div>
+      <div>
+        <p class="text-sm font-semibold">マミヤ</p>
+        <p class="text-xs text-slate-400">ITソリューションズ</p>
+      </div>
+    </div>
+  </div>
+  <nav class="flex-1 px-3 py-6 space-y-1" id="sidebarNav"></nav>
+  <div class="px-3 pb-6 border-t border-slate-700 pt-4 space-y-1">
+    <div class="px-4 py-2">
+      <p class="text-sm font-medium text-white" id="sidebarName"></p>
+      <p class="text-xs text-slate-400" id="sidebarEmail"></p>
+    </div>
+    <button onclick="logout()"
+      class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium
+             text-rose-400 hover:bg-slate-800 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
+      </svg>
+      ログアウト
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════ MAIN ══════════════════════════════ -->
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- Left: week + day cards -->
+  <div class="flex flex-col flex-1 overflow-hidden">
+    <div class="flex-1 overflow-y-auto p-8 pb-4">
+
+      <!-- Header -->
+      <div class="mb-8 flex items-center justify-between">
+        <div>
+          <h1 class="text-3xl font-bold text-slate-900 mb-2">日報報告</h1>
+          <p class="text-slate-600">日々の業務内容を報告してください。</p>
+        </div>
+        <select id="weekSelect"
+          class="h-9 px-4 w-96 text-slate-900 font-medium text-sm border border-slate-800
+                 focus:outline-none focus:ring-2 focus:ring-blue-300 rounded-sm bg-white"></select>
+      </div>
+
+      <!-- Week label -->
+      <div class="flex items-center justify-between mb-6 pb-4 border-b border-slate-200">
+        <h2 class="text-lg font-semibold text-slate-900" id="weekLabel"></h2>
+        <span class="text-sm text-slate-600" id="weekRange"></span>
+      </div>
+      <p class="text-sm font-medium text-slate-700 mb-6" id="monthLabel"></p>
+
+      <!-- Day cards -->
+      <div class="space-y-3" id="dayCards"></div>
+    </div>
+  </div>
+
+  <!-- Right: detail panel -->
+  <div class="w-5/12 border-l border-slate-200 bg-white overflow-y-auto flex flex-col">
+    <div class="p-8 border-b border-slate-100">
+      <h2 class="text-lg font-semibold text-slate-900">日報詳細</h2>
+      <p class="text-xs text-slate-500 mt-1" id="detailDateLabel">日を選択してください</p>
+    </div>
+    <div class="flex-1 p-8" id="detailPanel">
+      <p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════ SCRIPTS ════════════════════════════ -->
+<script>
+var _gasEl     = document.getElementById('gasVars');
+var APP_USER   = JSON.parse(_gasEl.getAttribute('data-user') || 'null');
+var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
+
+// ── Sidebar ───────────────────────────────────────────────────
+(function buildSidebar() {
+  if (!APP_USER) return;
+  document.getElementById('sidebarName').textContent  = APP_USER.name;
+  document.getElementById('sidebarEmail').textContent = APP_USER.email;
+
+  var items = [
+    {
+      label: '在宅勤務許可申請', page: 'reports', color: 'text-emerald-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    },
+    {
+      label: '日報報告', page: 'task_report', color: 'text-orange-400', active: true,
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/>',
+    },
+    {
+      label: 'チームカレンダー', page: 'calendar', color: 'text-violet-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>',
+    },
+  ];
+  if (APP_USER.role !== 'employee') {
+    items.push({
+      label: '申請承認', page: 'approve', color: 'text-emerald-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    });
+  }
+  if (APP_USER.role === 'admin') {
+    items.push({
+      label: '社員マスタ管理', page: 'employees', color: 'text-pink-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>',
+    });
+    items.push({
+      label: '申請履歴', page: 'admin_history', color: 'text-red-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>',
+    });
+  }
+
+  var nav = document.getElementById('sidebarNav');
+  items.forEach(function (item) {
+    var a = document.createElement('a');
+    a.href = SCRIPT_URL + '?page=' + item.page;
+    a.className = [
+      'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
+      item.active
+        ? 'bg-blue-600 text-white'
+        : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+    ].join(' ');
+    a.innerHTML =
+      '<svg class="w-4 h-4 flex-shrink-0 ' + item.color + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+      item.icon + '</svg>' + item.label;
+    if (!item.active) {
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        document.getElementById('pageLoader').classList.remove('hidden');
+        window.top.location.href = SCRIPT_URL + '?page=' + item.page;
+      });
+    }
+    nav.appendChild(a);
+  });
+})();
+
+// ── Load logo ─────────────────────────────────────────────────
+var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D';
+google.script.run
+  .withSuccessHandler(function (b) { if (b) document.getElementById('logoImg').src = b; })
+  .withFailureHandler(function () {})
+  .getImageAsBase64(logoFileId);
+
+// ── Week helpers ──────────────────────────────────────────────
+function getISOWeek(d) {
+  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  var y = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - y) / 86400000 + 1) / 7);
+}
+function getMondayOfWeek(offset) {
+  var today = new Date();
+  var day = today.getDay() || 7;
+  var monday = new Date(today);
+  monday.setDate(today.getDate() - day + 1 + offset * 7);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+function fmtDate(d) {
+  return d.getFullYear() + '/' +
+    String(d.getMonth() + 1).padStart(2, '0') + '/' +
+    String(d.getDate()).padStart(2, '0');
+}
+function isoDate(d) {
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Populate week selector (current + 3 past weeks for reporting) ─
+var weekSel    = document.getElementById('weekSelect');
+var DAY_SHORTS = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+
+for (var w = -3; w <= 0; w++) {
+  var mon = getMondayOfWeek(w);
+  var fri = new Date(mon); fri.setDate(mon.getDate() + 4);
+  var opt = document.createElement('option');
+  opt.value = w;
+  opt.textContent = '第' + getISOWeek(mon) + '週　' +
+    fmtDate(mon) + '（月）～' + fmtDate(fri) + '（金）';
+  if (w === 0) opt.selected = true;
+  weekSel.appendChild(opt);
+}
+
+// ── State ─────────────────────────────────────────────────────
+var selectedDayIdx = null;
+var myTaskReports  = [];
+var dayData        = makeFreshDayData();
+
+function makeFreshDayData() {
+  return [0,1,2,3,4].map(function () {
+    return { importantIssues: '', nextDayPlan: '', redmineTasks: [], edited: false, savedStatus: null };
+  });
+}
+
+// ── Load task reports on page load ────────────────────────────
+google.script.run
+  .withSuccessHandler(function (data) {
+    if (data && !data.error) myTaskReports = data;
+    renderWeek();
+  })
+  .withFailureHandler(function () { renderWeek(); })
+  .getMyTaskReports();
+
+// ── Reset on week change ──────────────────────────────────────
+weekSel.addEventListener('change', function () {
+  selectedDayIdx = null;
+  dayData = makeFreshDayData();
+  document.getElementById('detailDateLabel').textContent = '日を選択してください';
+  document.getElementById('detailPanel').innerHTML =
+    '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
+  renderWeek();
+  google.script.run
+    .withSuccessHandler(function (data) {
+      if (data && !data.error) {
+        myTaskReports = data;
+        dayData = makeFreshDayData();
+        renderWeek();
+      }
+    })
+    .getMyTaskReports();
+});
+
+// ── Render week ───────────────────────────────────────────────
+function renderWeek() {
+  var offset = parseInt(weekSel.value) || 0;
+  var mon    = getMondayOfWeek(offset);
+  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
+  var weekNo = getISOWeek(mon);
+
+  document.getElementById('weekLabel').textContent = '第' + weekNo + '週';
+  document.getElementById('weekRange').textContent = fmtDate(mon) + ' ～ ' + fmtDate(fri);
+  document.getElementById('monthLabel').textContent =
+    mon.getFullYear() + '年' + String(mon.getMonth() + 1).padStart(2, '0') + '月';
+
+  // Match task reports to days
+  var prevDayData = dayData;
+  var tempData = makeFreshDayData();
+  for (var i = 0; i < 5; i++) {
+    var d = new Date(mon); d.setDate(mon.getDate() + i);
+    var dStr = isoDate(d);
+    var match = myTaskReports.find(function (r) { return r.report_date === dStr; });
+    if (match) {
+      tempData[i].importantIssues = match.important_issues || '';
+      tempData[i].nextDayPlan     = match.next_day_plan || '';
+      tempData[i].redmineTasks    = match.redmineTasks || [];
+      tempData[i].edited          = true;
+      tempData[i].savedStatus     = match.status;
+    }
+  }
+  // Preserve optimistic state
+  for (var k = 0; k < 5; k++) {
+    if (prevDayData[k] && prevDayData[k].savedStatus && !tempData[k].savedStatus) {
+      tempData[k] = prevDayData[k];
+    } else if (prevDayData[k] && prevDayData[k].savedStatus &&
+               tempData[k].savedStatus &&
+               _statusRank(prevDayData[k].savedStatus) > _statusRank(tempData[k].savedStatus)) {
+      tempData[k].savedStatus = prevDayData[k].savedStatus;
+    }
+  }
+  dayData = tempData;
+
+  var container = document.getElementById('dayCards');
+  container.innerHTML = '';
+  for (var j = 0; j < 5; j++) {
+    var dd = new Date(mon); dd.setDate(mon.getDate() + j);
+    container.appendChild(makeDayCard(dd, DAY_SHORTS[j], j));
+  }
+}
+
+// ── Status helpers ────────────────────────────────────────────
+function statusBadgeHtml(status) {
+  var map = {
+    none:              { label: '未作成', cls: 'bg-slate-100 text-slate-700' },
+    draft:             { label: '作製中', cls: 'bg-blue-100 text-blue-700' },
+    submitted:         { label: '申請中', cls: 'bg-orange-100 text-orange-700' },
+    reviewer_approved: { label: '確認中', cls: 'bg-yellow-100 text-yellow-700' },
+    approved:          { label: '承認済', cls: 'bg-green-100 text-green-700' },
+    rejected:          { label: '差戻し',   cls: 'bg-red-100 text-red-700' },
+  };
+  var s = map[status] || map.none;
+  return '<span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ' +
+    s.cls + '">' + s.label + '</span>';
+}
+function _statusRank(s) {
+  var ranks = { none: 0, draft: 1, submitted: 2, reviewer_approved: 3, approved: 4, rejected: 0 };
+  return ranks[s] || 0;
+}
+
+// ── Day card ──────────────────────────────────────────────────
+function makeDayCard(d, dayShort, idx) {
+  var div = document.createElement('div');
+  var dayStatus = (dayData[idx] && dayData[idx].savedStatus) ? dayData[idx].savedStatus : 'none';
+
+  div.className = [
+    'flex items-start justify-between p-4 bg-white border rounded-lg cursor-pointer transition-all hover:shadow-md',
+    selectedDayIdx === idx ? 'border-blue-400 border-2' : 'border-slate-200',
+  ].join(' ');
+
+  div.innerHTML =
+    '<div class="flex items-center gap-4">' +
+      '<div class="flex flex-col items-center justify-center border-slate-300 border-2 p-2 bg-blue-50 rounded-md min-w-16 h-16">' +
+        '<span class="text-2xl font-bold text-slate-900">' + d.getDate() + '</span>' +
+        '<span class="text-xs font-medium text-amber-900 uppercase mt-1">' + dayShort + '</span>' +
+      '</div>' +
+      '<div>' + statusBadgeHtml(dayStatus) + '</div>' +
+    '</div>';
+
+  div.addEventListener('click', function () {
+    selectedDayIdx = idx;
+    renderWeek();
+    openDetailPanel(d, dayShort, idx);
+  });
+  return div;
+}
+
+// ── Detail panel ──────────────────────────────────────────────
+function openDetailPanel(d, dayShort, idx) {
+  debugger;
+  var dStr    = fmtDate(d);
+  var isoStr  = isoDate(d);
+  var data    = dayData[idx];
+
+  document.getElementById('detailDateLabel').textContent =
+    dStr + ' ' + dayShort + ' の日報作成';
+
+  var panel = document.getElementById('detailPanel');
+  panel.innerHTML =
+    // Redmine time entries card
+    '<div class="p-6 mb-6 border-dashed border-2 border-slate-300 bg-blue-50 rounded-lg">' +
+      '<div class="flex items-start gap-3">' +
+        '<span class="text-2xl leading-none">⏱️</span>' +
+        '<div class="flex-1">' +
+          '<p class="font-medium text-slate-800 text-sm">Redmine作業実績を同期</p>' +
+          '<p class="text-xs text-slate-500 mt-1">この日に記録された作業時間と進捗を取り込みます。</p>' +
+        '</div>' +
+      '</div>' +
+      '<button id="syncBtn_' + idx + '" onclick="syncRedmineEntries(' + idx + ',\'' + isoStr + '\')" ' +
+        'class="mt-4 w-full h-9 border border-slate-400 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-full transition-colors">' +
+        (data.redmineTasks && data.redmineTasks.length > 0 ? 'Redmine実績を再読み込み' : 'Redmine実績と同期') +
+      '</button>' +
+      '<div id="redmineList_' + idx + '" class="mt-3 space-y-2"></div>' +
+    '</div>' +
+    // 重要課題
+    '<div class="mb-4">' +
+      '<label class="text-xs font-medium text-slate-700 block mb-1">重要課題</label>' +
+      '<textarea id="importantIssues_' + idx + '" rows="4" ' +
+        'placeholder="本日の重要な課題や成果を記入してください..." ' +
+        'class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-300">' +
+        escapeHtml(data.importantIssues) +
+      '</textarea>' +
+    '</div>' +
+    // 翌営業日の作業予定
+    '<div class="mb-6">' +
+      '<label class="text-xs font-medium text-slate-700 block mb-1">翌営業日の作業予定</label>' +
+      '<textarea id="nextDayPlan_' + idx + '" rows="4" ' +
+        'placeholder="次の営業日に予定している作業を記入してください..." ' +
+        'class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-300">' +
+        escapeHtml(data.nextDayPlan) +
+      '</textarea>' +
+    '</div>' +
+    // Action buttons — individual day submit
+    '<div class="space-y-3">' +
+      '<div class="flex gap-3">' +
+        '<button onclick="saveTaskDay(' + idx + ')" ' +
+          'class="flex-1 h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors">' +
+          '保存' +
+        '</button>' +
+        '<button onclick="cancelTaskDay(' + idx + ')" ' +
+          'class="flex-1 h-10 px-6 bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-full transition-colors">' +
+          'キャンセル' +
+        '</button>' +
+      '</div>' +
+      '<button onclick="submitTaskDay(' + idx + ')" ' +
+        'class="w-full h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors flex items-center justify-center gap-2">' +
+        '申請' +
+        '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>' +
+        '</svg>' +
+      '</button>' +
+    '</div>' +
+    '<div id="dayMsg_' + idx + '" class="hidden mt-3 text-sm text-center p-2 rounded-md"></div>';
+
+  // Render saved Redmine tasks
+  if (data.redmineTasks && data.redmineTasks.length > 0) {
+    renderRedmineTasks(idx, data.redmineTasks, true);
+  }
+}
+
+// ── Render Redmine time entry tasks ───────────────────────────
+function renderRedmineTasks(idx, tasks, fromSavedData) {
+  var container = document.getElementById('redmineList_' + idx);
+  if (!container) return;
+  if (!tasks || tasks.length === 0) { container.innerHTML = ''; return; }
+
+  if (fromSavedData) {
+    container.innerHTML = '<p class="text-xs text-slate-600 mb-2 font-semibold">記録された作業実績:</p>' +
+      tasks.map(function (t) {
+        return '<div class="text-xs bg-white border border-green-300 rounded px-3 py-2 text-slate-700">' +
+          '<div class="flex items-center gap-2">' +
+            '<span class="text-green-600">✓</span>' +
+            '<div class="flex-1">' +
+              '<span class="font-medium">#' + escapeHtml(String(t.id || '')) + '</span> ' +
+              '<span>' + escapeHtml(t.subject || '') + '</span>' +
+              '<div class="flex gap-3 mt-1 text-slate-500">' +
+                (t.project ? '<span>' + escapeHtml(t.project) + '</span>' : '') +
+                '<span>⏱ ' + (t.hours || 0) + 'h</span>' +
+                '<span>進捗: ' + (t.progress || 0) + '%</span>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    return;
+  }
+
+  // Fresh sync — read-only display (not selectable, auto-included)
+  container.innerHTML = '<p class="text-xs text-slate-600 mb-2 font-semibold">本日の作業実績 (' + tasks.length + '件):</p>' +
+    tasks.map(function (t) {
+      return '<div class="text-xs bg-white border border-blue-200 rounded px-3 py-2 text-slate-700">' +
+        '<div class="flex items-start gap-2">' +
+          '<span class="text-blue-500 mt-0.5">📋</span>' +
+          '<div class="flex-1">' +
+            '<div class="font-medium text-slate-900">#' + escapeHtml(String(t.id)) + ' ' + escapeHtml(t.subject) + '</div>' +
+            '<div class="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-slate-500">' +
+              (t.project  ? '<span>' + escapeHtml(t.project) + '</span>'   : '') +
+              (t.tracker  ? '<span>' + escapeHtml(t.tracker) + '</span>'   : '') +
+              (t.status   ? '<span>' + escapeHtml(t.status) + '</span>'    : '') +
+              '<span class="font-medium text-blue-700">⏱ ' + (t.hours || 0) + 'h</span>' +
+              '<span class="font-medium text-emerald-700">進捗: ' + (t.progress || 0) + '%</span>' +
+            '</div>' +
+            (t.comments && t.comments.length > 0
+              ? '<div class="mt-1 text-slate-400 italic">' + escapeHtml(t.comments.join(', ')) + '</div>'
+              : '') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+}
+
+// ── Sync Redmine time entries ─────────────────────────────────
+function syncRedmineEntries(idx, dateStr) {
+  var btn = document.getElementById('syncBtn_' + idx);
+  if (!btn) return;
+  btn.textContent = '同期中...';
+  btn.disabled = true;
+  google.script.run
+    .withSuccessHandler(function (result) {
+      var msgEl = document.getElementById('redmineList_' + idx);
+      if (result && !Array.isArray(result) && result.error) {
+        if (msgEl) msgEl.innerHTML = '<p class="text-xs text-red-600 italic">' + escapeHtml(result.error) + '</p>';
+        btn.textContent = 'Redmine実績と同期';
+        btn.disabled = false;
+        return;
+      }
+      var tasks = Array.isArray(result) ? result : [];
+      dayData[idx].redmineTasks = tasks; // auto-include all entries
+      if (tasks.length === 0) {
+        if (msgEl) msgEl.innerHTML = '<p class="text-xs text-slate-500 italic">この日の作業実績が見つかりません</p>';
+        btn.textContent = 'Redmine実績と同期';
+        btn.disabled = false;
+        return;
+      }
+      renderRedmineTasks(idx, tasks, false);
+      btn.textContent = 'Redmine実績を再読み込み';
+      btn.disabled = false;
+    })
+    .withFailureHandler(function (err) {
+      var msgEl = document.getElementById('redmineList_' + idx);
+      if (msgEl) {
+        msgEl.innerHTML = '<p class="text-xs text-red-600 italic">同期エラー: ' +
+          escapeHtml(String(err && err.message ? err.message : '不明なエラー')) + '</p>';
+      }
+      btn.textContent = 'Redmine実績と同期';
+      btn.disabled = false;
+    })
+    .getRedmineTimeEntries(dateStr);
+}
+
+// ── Save day draft ────────────────────────────────────────────
+function saveTaskDay(idx) {
+  var ii = document.getElementById('importantIssues_' + idx);
+  var np = document.getElementById('nextDayPlan_' + idx);
+  if (!ii || !np) return;
+
+  dayData[idx].importantIssues = ii.value;
+  dayData[idx].nextDayPlan     = np.value;
+  dayData[idx].edited          = true;
+  dayData[idx].savedStatus     = 'draft';
+
+  var offset = parseInt(weekSel.value) || 0;
+  var mon    = getMondayOfWeek(offset);
+  var date   = new Date(mon); date.setDate(mon.getDate() + idx);
+
+  var payload = {
+    date:            isoDate(date),
+    dayShort:        DAY_SHORTS[idx],
+    importantIssues: dayData[idx].importantIssues,
+    nextDayPlan:     dayData[idx].nextDayPlan,
+    redmineTasks:    dayData[idx].redmineTasks || [],
+  };
+
+  renderWeek();
+  openDetailPanel(date, DAY_SHORTS[idx], idx);
+  showDayMsg(idx, '保存中...', true);
+
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.error) {
+        dayData[idx].savedStatus = null;
+        dayData[idx].edited = false;
+        renderWeek();
+        openDetailPanel(date, DAY_SHORTS[idx], idx);
+        showDayMsg(idx, r.error, false);
+        return;
+      }
+      showDayMsg(idx, '💾 下書き保存しました', true);
+      google.script.run
+        .withSuccessHandler(function (data) {
+          if (data && !data.error) {
+            myTaskReports = data;
+            renderWeek();
+            if (selectedDayIdx === idx) openDetailPanel(date, DAY_SHORTS[idx], idx);
+          }
+        })
+        .getMyTaskReports();
+    })
+    .withFailureHandler(function () {
+      dayData[idx].savedStatus = null;
+      dayData[idx].edited = false;
+      renderWeek();
+      openDetailPanel(date, DAY_SHORTS[idx], idx);
+      showDayMsg(idx, '保存に失敗しました', false);
+    })
+    .saveTaskReportDraft(payload);
+}
+
+// ── Submit single day ─────────────────────────────────────────
+function submitTaskDay(idx) {
+  var ii = document.getElementById('importantIssues_' + idx);
+  var np = document.getElementById('nextDayPlan_' + idx);
+
+  var offset = parseInt(weekSel.value) || 0;
+  var mon    = getMondayOfWeek(offset);
+  var date   = new Date(mon); date.setDate(mon.getDate() + idx);
+
+  // If not yet saved, save as draft first then submit
+  if (!dayData[idx].savedStatus || dayData[idx].savedStatus === 'none') {
+    if (!ii || !np) return;
+    dayData[idx].importantIssues = ii.value;
+    dayData[idx].nextDayPlan     = np.value;
+    dayData[idx].edited          = true;
+    dayData[idx].savedStatus     = 'draft';
+
+    var draftPayload = {
+      date:            isoDate(date),
+      dayShort:        DAY_SHORTS[idx],
+      importantIssues: dayData[idx].importantIssues,
+      nextDayPlan:     dayData[idx].nextDayPlan,
+      redmineTasks:    dayData[idx].redmineTasks || [],
+    };
+
+    renderWeek();
+    openDetailPanel(date, DAY_SHORTS[idx], idx);
+    showDayMsg(idx, '保存して申請中...', true);
+
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.error) {
+          dayData[idx].savedStatus = null;
+          renderWeek();
+          openDetailPanel(date, DAY_SHORTS[idx], idx);
+          showDayMsg(idx, r.error, false);
+          return;
+        }
+        // Now submit
+        _doSubmit(idx, date);
+      })
+      .withFailureHandler(function () {
+        dayData[idx].savedStatus = null;
+        renderWeek();
+        openDetailPanel(date, DAY_SHORTS[idx], idx);
+        showDayMsg(idx, '保存に失敗しました', false);
+      })
+      .saveTaskReportDraft(draftPayload);
+    return;
+  }
+
+  if (dayData[idx].savedStatus === 'draft') {
+    // Save latest edits first
+    if (ii && np) {
+      dayData[idx].importantIssues = ii.value;
+      dayData[idx].nextDayPlan     = np.value;
+    }
+    var updatePayload = {
+      date:            isoDate(date),
+      dayShort:        DAY_SHORTS[idx],
+      importantIssues: dayData[idx].importantIssues,
+      nextDayPlan:     dayData[idx].nextDayPlan,
+      redmineTasks:    dayData[idx].redmineTasks || [],
+    };
+    renderWeek();
+    openDetailPanel(date, DAY_SHORTS[idx], idx);
+    showDayMsg(idx, '申請中...', true);
+
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.error) { showDayMsg(idx, r.error, false); return; }
+        _doSubmit(idx, date);
+      })
+      .withFailureHandler(function () { showDayMsg(idx, '保存に失敗しました', false); })
+      .saveTaskReportDraft(updatePayload);
+    return;
+  }
+
+  showDayMsg(idx, 'この日報は既に申請済みです', false);
+}
+
+function _doSubmit(idx, date) {
+  var payload = { date: isoDate(date) };
+  dayData[idx].savedStatus = 'submitted';
+  renderWeek();
+  openDetailPanel(date, DAY_SHORTS[idx], idx);
+
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.error) {
+        dayData[idx].savedStatus = 'draft';
+        renderWeek();
+        openDetailPanel(date, DAY_SHORTS[idx], idx);
+        showDayMsg(idx, r.error, false);
+        return;
+      }
+      showDayMsg(idx, '✅ 日報を申請しました', true);
+      google.script.run
+        .withSuccessHandler(function (data) {
+          if (data && !data.error) {
+            myTaskReports = data;
+            renderWeek();
+            if (selectedDayIdx === idx) openDetailPanel(date, DAY_SHORTS[idx], idx);
+          }
+        })
+        .getMyTaskReports();
+    })
+    .withFailureHandler(function () {
+      dayData[idx].savedStatus = 'draft';
+      renderWeek();
+      openDetailPanel(date, DAY_SHORTS[idx], idx);
+      showDayMsg(idx, '申請に失敗しました', false);
+    })
+    .submitTaskReport(payload);
+}
+
+function cancelTaskDay(idx) {
+  selectedDayIdx = null;
+  document.getElementById('detailDateLabel').textContent = '日を選択してください';
+  document.getElementById('detailPanel').innerHTML =
+    '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
+  renderWeek();
+}
+
+function showDayMsg(idx, msg, ok) {
+  var el = document.getElementById('dayMsg_' + idx);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'mt-3 text-sm text-center p-2 rounded-md ' +
+    (ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
+  el.classList.remove('hidden');
+  setTimeout(function () { el.classList.add('hidden'); }, 2500);
+}
+
+// ── Logout ────────────────────────────────────────────────────
+function logout() {
+  document.getElementById('pageLoader').classList.remove('hidden');
+  google.script.run
+    .withSuccessHandler(function (r) { window.top.location.href = r.redirectUrl; })
+    .logoutUser();
+}
+</script>
+</body>
+</html>

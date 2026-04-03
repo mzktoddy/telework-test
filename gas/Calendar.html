@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>テレワーク・プロ | チームカレンダー</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 h-screen flex overflow-hidden">
+
+<!-- Page loader -->
+<div id="pageLoader" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center">
+  <div class="flex flex-col items-center gap-3">
+    <div class="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+    <p class="text-white text-sm font-medium">読み込み中...</p>
+  </div>
+</div>
+
+<!-- GAS template vars -->
+<div id="gasVars" data-user='<?!= user ?>' data-url="<?= scriptUrl ?>" style="display:none"></div>
+
+<!-- ═══════════════════════════ SIDEBAR ═══════════════════════════ -->
+<aside class="flex flex-col h-screen w-64 bg-slate-900 text-white overflow-y-auto flex-shrink-0">
+  <div class="p-6 border-b border-slate-700">
+    <div class="flex items-center justify-center gap-3">
+      <div class="bg-blue-100 rounded-md text-sm font-bold">
+        <img src="" id="logoImg" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
+      </div>
+      <div>
+        <p class="text-sm font-semibold">マミヤ</p>
+        <p class="text-xs text-slate-400">ITソリューションズ</p>
+      </div>
+    </div>
+  </div>
+  <nav class="flex-1 px-3 py-6 space-y-1" id="sidebarNav"></nav>
+  <div class="px-3 pb-6 border-t border-slate-700 pt-4 space-y-1">
+    <div class="px-4 py-2">
+      <p class="text-sm font-medium text-white" id="sidebarName"></p>
+      <p class="text-xs text-slate-400" id="sidebarEmail"></p>
+    </div>
+    <button onclick="logout()"
+      class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium
+             text-rose-400 hover:bg-slate-800 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
+      </svg>
+      ログアウト
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════ MAIN ══════════════════════════════ -->
+<main class="flex-1 overflow-y-auto p-8">
+
+  <!-- Header -->
+  <div class="mb-5 flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-bold text-slate-900 mb-1">チームカレンダー</h1>
+      <p class="text-sm text-slate-500">在宅勤務の申請状況をカレンダーで確認できます</p>
+    </div>
+    <!-- Department filter -->
+    <select id="deptFilter" onchange="applyFilter()"
+      class="h-9 px-3 min-w-[180px] border border-slate-300 rounded-lg text-sm
+             focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-700">
+      <option value="">全部署</option>
+    </select>
+  </div>
+
+  <!-- Month navigation bar -->
+  <div class="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-4 py-2.5 mb-4 shadow-sm">
+    <button onclick="goToday()"
+      class="h-8 px-4 text-sm font-medium text-slate-600 border border-slate-200
+             hover:bg-slate-50 rounded-lg transition-colors whitespace-nowrap">今日</button>
+    <div class="flex items-center gap-2">
+      <button onclick="prevMonth()"
+        class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-600
+               hover:bg-slate-100 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <div class="flex items-center gap-1">
+        <input id="navYear" type="number" min="2000" max="2099"
+          onchange="_onNavInput()"
+          class="w-20 h-8 text-center text-lg font-bold text-slate-900 border-0
+                 focus:outline-none focus:ring-2 focus:ring-blue-300 rounded-lg
+                 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none
+                 [&::-webkit-outer-spin-button]:appearance-none" />
+        <span class="text-lg font-bold text-slate-900">年</span>
+        <input id="navMonth" type="number" min="1" max="12"
+          onchange="_onNavInput()"
+          class="w-12 h-8 text-center text-lg font-bold text-slate-900 border-0
+                 focus:outline-none focus:ring-2 focus:ring-blue-300 rounded-lg
+                 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none
+                 [&::-webkit-outer-spin-button]:appearance-none" />
+        <span class="text-lg font-bold text-slate-900">月</span>
+      </div>
+      <button onclick="nextMonth()"
+        class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-600
+               hover:bg-slate-100 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+      </button>
+    </div>
+    <div class="w-16"></div><!-- spacer to center the nav -->
+  </div>
+
+  <!-- Loading -->
+  <div id="calLoading" class="text-center py-16 text-slate-400 text-sm">読み込み中...</div>
+
+  <!-- Calendar container -->
+  <div id="calWrap" class="hidden bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+    <!-- Day-of-week headers -->
+    <div class="grid grid-cols-7 divide-x divide-slate-200 border-b border-slate-200 bg-slate-50">
+      <div class="py-3 text-center text-xs font-semibold text-slate-500 tracking-widest">月</div>
+      <div class="py-3 text-center text-xs font-semibold text-slate-500 tracking-widest">火</div>
+      <div class="py-3 text-center text-xs font-semibold text-slate-500 tracking-widest">水</div>
+      <div class="py-3 text-center text-xs font-semibold text-slate-500 tracking-widest">木</div>
+      <div class="py-3 text-center text-xs font-semibold text-slate-500 tracking-widest">金</div>
+      <div class="py-3 text-center text-xs font-semibold text-blue-400 tracking-widest">土</div>
+      <div class="py-3 text-center text-xs font-semibold text-rose-400 tracking-widest">日</div>
+    </div>
+    <!-- Calendar cells -->
+    <div class="grid grid-cols-7 divide-x divide-slate-100" id="calGrid"
+         style="grid-auto-rows: minmax(110px, auto);"></div>
+  </div>
+
+</main>
+
+<!-- ════════════════════════ DAY POPUP ════════════════════════ -->
+<div id="dayPopup" class="hidden fixed z-50" style="width:220px">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden">
+    <!-- Header -->
+    <div class="flex items-center justify-between gap-2 px-4 py-3 bg-slate-50 border-b border-slate-200">
+      <span class="text-sm font-bold text-slate-800" id="popupDate"></span>
+      <span class="text-sm font-bold text-slate-500" id="popupCount"></span>
+    </div>
+    <!-- List -->
+    <div id="popupList" class="overflow-y-auto" style="max-height:260px;"></div>
+    <!-- Footer -->
+    <div class="flex items-center justify-between px-3 py-2 border-t border-slate-100">
+      <div class="flex items-center gap-1">
+        <button onclick="popupScroll(-1)"
+          class="w-5 h-5 flex items-center justify-center border border-slate-200 rounded
+                 text-slate-400 hover:bg-slate-50 text-xs leading-none">↑</button>
+        <button onclick="popupScroll(1)"
+          class="w-5 h-5 flex items-center justify-center border border-slate-200 rounded
+                 text-slate-400 hover:bg-slate-50 text-xs leading-none">↓</button>
+      </div>
+      <button onclick="closeDayPopup()"
+        class="text-xs text-slate-400 hover:text-slate-700 transition-colors">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════ TOAST ════════════════════════ -->
+<div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg text-sm font-medium text-white shadow-lg"></div>
+
+<script>
+var _gasEl     = document.getElementById('gasVars');
+var APP_USER   = JSON.parse(_gasEl.getAttribute('data-user') || 'null');
+var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
+
+// ── Sidebar ───────────────────────────────────────────────────
+(function buildSidebar() {
+  if (!APP_USER) return;
+  document.getElementById('sidebarName').textContent  = APP_USER.name;
+  document.getElementById('sidebarEmail').textContent = APP_USER.email;
+
+  var items = [
+    {
+      label: '在宅勤務許可申請', page: 'reports', color: 'text-emerald-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    },
+    {
+      label: '日報報告', page: 'task_report', color: 'text-orange-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/>',
+    },
+    {
+      label: 'チームカレンダー', page: 'calendar', color: 'text-violet-400', active: true,
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>',
+    },
+  ];
+  if (APP_USER.role !== 'employee') {
+    items.push({
+      label: '申請承認', page: 'approve', color: 'text-emerald-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    });
+  }
+  if (APP_USER.role === 'admin') {
+    items.push({
+      label: '社員マスタ管理', page: 'employees', color: 'text-pink-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>',
+    });
+    items.push({
+      label: '申請履歴', page: 'admin_history', color: 'text-red-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>',
+    });
+
+  }
+
+  var nav = document.getElementById('sidebarNav');
+  items.forEach(function (item) {
+    var a = document.createElement('a');
+    a.href = SCRIPT_URL + '?page=' + item.page;
+    a.className = [
+      'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
+      item.active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+    ].join(' ');
+    a.innerHTML =
+      '<svg class="w-4 h-4 flex-shrink-0 ' + (item.active ? 'text-white' : item.color) + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+      item.icon + '</svg>' + item.label;
+    if (!item.active) {
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        document.getElementById('pageLoader').classList.remove('hidden');
+        window.top.location.href = SCRIPT_URL + '?page=' + item.page;
+      });
+    }
+    nav.appendChild(a);
+  });
+})();
+
+// ── Load logo ─────────────────────────────────────────────────
+var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D';
+google.script.run
+  .withSuccessHandler(function (b) { if (b) document.getElementById('logoImg').src = b; })
+  .withFailureHandler(function () {})
+  .getImageAsBase64(logoFileId);
+
+// ── Logout ─────────────────────────────────────────────────────
+function logout() {
+  google.script.run
+    .withSuccessHandler(function () { window.top.location.href = SCRIPT_URL + '?page=login'; })
+    .withFailureHandler(function () { window.top.location.href = SCRIPT_URL + '?page=login'; })
+    .logoutUser();
+}
+
+// ── State ─────────────────────────────────────────────────────
+var _allData    = [];
+var _filtered   = [];
+var _year       = new Date().getFullYear();
+var _month      = new Date().getMonth(); // 0-indexed
+var _dataReady  = false;
+var _deptsReady = false;
+
+// ── Data loading ──────────────────────────────────────────────
+google.script.run
+  .withSuccessHandler(function (data) {
+    _allData   = Array.isArray(data) ? data : [];
+    _dataReady = true;
+    _checkReady();
+  })
+  .withFailureHandler(function () {
+    _dataReady = true;
+    _checkReady();
+    showToast('データの読み込みに失敗しました', true);
+  })
+  .getTeamCalendarData();
+
+google.script.run
+  .withSuccessHandler(function (depts) {
+    if (Array.isArray(depts)) {
+      var sel = document.getElementById('deptFilter');
+      depts.forEach(function (d) {
+        var opt = document.createElement('option');
+        opt.value       = d.id;
+        opt.textContent = d.name;
+        sel.appendChild(opt);
+      });
+    }
+    _deptsReady = true;
+    _checkReady();
+  })
+  .withFailureHandler(function () {
+    _deptsReady = true;
+    _checkReady();
+  })
+  .getTeamCalendarDepartments();
+
+function _checkReady() {
+  if (!_dataReady || !_deptsReady) return;
+  document.getElementById('calLoading').classList.add('hidden');
+  document.getElementById('calWrap').classList.remove('hidden');
+  // Hide dept filter for non-admin users (server already filters their data)
+  if (APP_USER && APP_USER.role !== 'admin') {
+    var dfWrap = document.getElementById('deptFilter');
+    if (dfWrap) dfWrap.style.display = 'none';
+  }
+  applyFilter();
+}
+
+// ── Navigation ────────────────────────────────────────────────
+function _syncNavInputs() {
+  document.getElementById('navYear').value  = _year;
+  document.getElementById('navMonth').value = _month + 1;
+}
+
+function _onNavInput() {
+  var y = parseInt(document.getElementById('navYear').value,  10);
+  var m = parseInt(document.getElementById('navMonth').value, 10);
+  if (isNaN(y) || isNaN(m)) return;
+  // Clamp month 1-12
+  if (m < 1)  { m = 1;  document.getElementById('navMonth').value = 1; }
+  if (m > 12) { m = 12; document.getElementById('navMonth').value = 12; }
+  if (y < 2000 || y > 2099) return;
+  _year  = y;
+  _month = m - 1;
+  renderCalendar();
+}
+
+function prevMonth() {
+  _month--;
+  if (_month < 0) { _month = 11; _year--; }
+  renderCalendar();
+}
+function nextMonth() {
+  _month++;
+  if (_month > 11) { _month = 0; _year++; }
+  renderCalendar();
+}
+function goToday() {
+  var t  = new Date();
+  _year  = t.getFullYear();
+  _month = t.getMonth();
+  renderCalendar();
+}
+
+// ── Dept filter ───────────────────────────────────────────────
+function applyFilter() {
+  var deptId = document.getElementById('deptFilter').value;
+  _filtered  = deptId
+    ? _allData.filter(function (r) { return r.department_id === deptId; })
+    : _allData.slice();
+  renderCalendar();
+}
+
+// ── Entries for a specific date ───────────────────────────────
+function _getEntries(dateStr) {
+  return _filtered.filter(function (r) { return r.request_date === dateStr; });
+}
+
+// ── Render calendar grid ──────────────────────────────────────
+function renderCalendar() {
+  closeDayPopup();
+  _syncNavInputs();
+
+  var MONTHS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+  var today    = new Date();
+  var todayStr = today.getFullYear() + '-' +
+    String(today.getMonth() + 1).padStart(2, '0') + '-' +
+    String(today.getDate()).padStart(2, '0');
+
+  // Offset: JS getDay() Sunday=0, Mon=1; we want Mon-first grid (Mon=0, Sun=6)
+  var jsFirstDay = new Date(_year, _month, 1).getDay();
+  var offset     = (jsFirstDay === 0) ? 6 : jsFirstDay - 1;
+  var daysInMonth = new Date(_year, _month + 1, 0).getDate();
+
+  // 5 or 6 complete rows
+  var totalCells = Math.ceil((offset + daysInMonth) / 7) * 7;
+  if (totalCells < 35) totalCells = 35;
+
+  var grid = document.getElementById('calGrid');
+  grid.innerHTML = '';
+
+  for (var i = 0; i < totalCells; i++) {
+    var dayNum = i - offset + 1;
+    var colIdx = i % 7; // 0=Mon … 5=Sat … 6=Sun
+    var isValid = (dayNum >= 1 && dayNum <= daysInMonth);
+
+    var cell = document.createElement('div');
+    cell.className = [
+      'p-2 border-b border-slate-100',
+      colIdx < 6 ? 'border-r border-slate-100' : '',
+      colIdx === 5 ? 'bg-sky-50/40'  : '',
+      colIdx === 6 ? 'bg-rose-50/40' : '',
+      !isValid     ? 'bg-slate-50/50' : '',
+    ].filter(Boolean).join(' ');
+
+    if (isValid) {
+      var dateStr = _year + '-' +
+        String(_month + 1).padStart(2, '0') + '-' +
+        String(dayNum).padStart(2, '0');
+
+      var isToday  = (dateStr === todayStr);
+      var entries  = _getEntries(dateStr);
+
+      // Day number
+      var numCls = [
+        'inline-flex items-center justify-center w-7 h-7 rounded-full text-sm font-medium mb-1',
+        isToday   ? 'bg-blue-600 text-white font-bold'
+          : colIdx === 6 ? 'text-rose-500 font-semibold'
+          : colIdx === 5 ? 'text-blue-500 font-semibold'
+          : 'text-slate-700',
+      ].join(' ');
+
+      var contentHtml = '';
+
+      if (entries.length > 0 && entries.length <= 5) {
+        // Show each employee pill — clicking the block opens popup for dept detail
+        contentHtml =
+          '<div onclick="showDayPopup(\'' + _escJs(dateStr) + '\',event)" class="cursor-pointer space-y-0.5">' +
+          entries.map(function (e) {
+            return '<div class="flex items-center gap-1 px-1.5 py-0.5 bg-slate-800 rounded text-white">' +
+              '<span class="flex-1 min-w-0 text-xs font-medium truncate leading-tight">' +
+                escHtml(e.employee_name) +
+              '</span>' +
+              _statusChip(e.status) +
+            '</div>';
+          }).join('') +
+          '</div>';
+
+      } else if (entries.length > 5) {
+        // Show count button only
+        contentHtml =
+          '<button onclick="showDayPopup(\'' + _escJs(dateStr) + '\',event)" ' +
+          'class="mt-0.5 w-full flex items-center gap-1.5 px-2 py-1.5 bg-slate-800 ' +
+          'hover:bg-slate-700 text-white text-xs font-medium rounded-lg transition-colors">' +
+          '<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" ' +
+          'd="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857' +
+          'M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857' +
+          'm0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>' +
+          '</svg>' +
+          entries.length + '名 テレワーク' +
+          '</button>';
+      }
+
+      cell.innerHTML = '<div class="' + numCls + '">' + dayNum + '</div>' + contentHtml;
+    }
+
+    grid.appendChild(cell);
+  }
+}
+
+// ── Status chip (dark background, used in cell pills) ─────────
+function _statusChip(status) {
+  var MAP = {
+    approved:          ['承認', 'bg-green-500/25 text-green-300'],
+    submitted:         ['申請中', 'bg-orange-500/25 text-orange-300'],
+    reviewer_approved: ['審査済', 'bg-blue-500/25 text-blue-300'],
+    rejected:          ['差戻し',  'bg-red-500/25 text-red-300'],
+  };
+  var info = MAP[status] || ['‐', 'bg-slate-500/25 text-slate-400'];
+  return '<span class="flex-shrink-0 text-[10px] px-1 py-0.5 rounded whitespace-nowrap ' +
+    info[1] + '">' + info[0] + '</span>';
+}
+
+// ── Status badge (light background, used in popup) ────────────
+function _statusBadge(status) {
+  var MAP = {
+    approved:          ['承認済み', 'bg-green-100 text-green-700'],
+    submitted:         ['申請中',   'bg-orange-100 text-orange-700'],
+    reviewer_approved: ['審査承認', 'bg-blue-100 text-blue-700'],
+    rejected:          ['差戻し',     'bg-red-100 text-red-700'],
+  };
+  var info = MAP[status] || [status || '‐', 'bg-slate-100 text-slate-500'];
+  return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ' +
+    info[1] + '">' + info[0] + '</span>';
+}
+
+// ── Day popup ─────────────────────────────────────────────────
+function showDayPopup(dateStr, event) {
+  var entries = _getEntries(dateStr);
+  if (!entries.length) return;
+
+  document.getElementById('popupDate').textContent  = dateStr;
+  document.getElementById('popupCount').textContent = entries.length + '名';
+
+  document.getElementById('popupList').innerHTML = entries.map(function (e) {
+    return '<div class="flex items-center gap-2 px-3 py-2.5 border-b border-slate-50 ' +
+      'last:border-0 hover:bg-slate-50 transition-colors">' +
+      '<div class="flex-1 min-w-0">' +
+        '<p class="text-sm font-medium text-slate-900 truncate">' + escHtml(e.employee_name) + '</p>' +
+        '<p class="text-xs text-slate-400 truncate">' + escHtml(e.department) + '</p>' +
+      '</div>' +
+      _statusBadge(e.status) +
+    '</div>';
+  }).join('');
+
+  // Smart position: favour right/below click, flip if off-screen
+  var popup = document.getElementById('dayPopup');
+  popup.classList.remove('hidden');
+
+  var PW = 220, PH = 340;
+  var vw = window.innerWidth, vh = window.innerHeight;
+  var x  = event.clientX, y = event.clientY;
+
+  var left = x + 12;
+  var top  = y + 12;
+  if (left + PW > vw - 12) left = x - PW - 12;
+  if (top  + PH > vh - 12) top  = Math.max(12, vh - PH - 12);
+  if (left < 12) left = 12;
+
+  popup.style.left = left + 'px';
+  popup.style.top  = top  + 'px';
+
+  event.stopPropagation();
+}
+
+function closeDayPopup() {
+  document.getElementById('dayPopup').classList.add('hidden');
+}
+
+function popupScroll(dir) {
+  document.getElementById('popupList').scrollBy({ top: dir * 80, behavior: 'smooth' });
+}
+
+document.addEventListener('click', function (e) {
+  var pop = document.getElementById('dayPopup');
+  if (!pop.classList.contains('hidden') && !pop.contains(e.target)) {
+    closeDayPopup();
+  }
+});
+
+// ── Utilities ─────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function _escJs(s) {
+  return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+function showToast(msg, isError) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className =
+    'fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg text-sm font-medium text-white shadow-lg ' +
+    (isError ? 'bg-red-600' : 'bg-green-600');
+  el.classList.remove('hidden');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(function () { el.classList.add('hidden'); }, 3500);
+}
+</script>
+</body>
+</html>

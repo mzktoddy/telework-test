@@ -19,6 +19,7 @@ var SHEET_DEPARTMENTS = 'departments';
 var SHEET_USERS       = 'users';
 var SHEET_REPORTS     = 'telework_reports';
 var SHEET_APPROVALS   = 'approvals';
+var SHEET_TASK_REPORTS = 'task_reports';
 
 // ── Sheet access ─────────────────────────────────────────────
 function getSpreadsheet() {
@@ -39,6 +40,7 @@ function setupSheets() {
   _createSheet(ss, SHEET_USERS,       ['id','email','password_hash','name','role','department_id','is_active','created_at','updated_at']);
   _createSheet(ss, SHEET_REPORTS,     ['id','employee_id','report_type','start_date','end_date','request_date','week_title','work_type','day_short','notes','redmine_tasks','status','created_at','updated_at']);
   _createSheet(ss, SHEET_APPROVALS,   ['id','report_id','approver_id','level','decision','comment','decided_at','created_at']);
+  _createSheet(ss, SHEET_TASK_REPORTS, ['id','employee_id','report_date','day_short','important_issues','next_day_plan','redmine_tasks','status','created_at','updated_at']);
   _seedData(ss);
   return '✅ セットアップ完了';
 }
@@ -57,7 +59,7 @@ function _createSheet(ss, name, headers) {
 
 // ── Generic helpers ──────────────────────────────────────────
 // Columns that hold YYYY-MM-DD date values (not datetime)
-var _DATE_COLS = ['start_date', 'end_date', 'request_date', 'decided_at'];
+var _DATE_COLS = ['start_date', 'end_date', 'request_date', 'decided_at', 'report_date'];
 
 // Convert a value (possibly a Date object from Sheets) to YYYY-MM-DD string
 function _dateStr(val) {
@@ -614,6 +616,379 @@ function addEmployee(data) {
 
 function getDepartmentList() {
   return getAllDepartments();
+}
+
+// ── Task Reports (日報) ───────────────────────────────────────
+var TASK_REPORT_H = ['id','employee_id','report_date','day_short','important_issues','next_day_plan','redmine_tasks','status','created_at','updated_at'];
+
+function getAllTaskReports() {
+  return _sheetToObjects(getSheet(SHEET_TASK_REPORTS));
+}
+function getTaskReportsByEmployee(employeeId) {
+  return getAllTaskReports().filter(function (r) { return r.employee_id === employeeId; });
+}
+
+// Client-facing: get my task reports grouped by week
+function getMyTaskReports() {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  var records = getTaskReportsByEmployee(user.id);
+  return records.map(function (r) {
+    var redmineTasks = [];
+    try { redmineTasks = JSON.parse(r.redmine_tasks || '[]'); } catch (e) {}
+    return {
+      id:              r.id,
+      report_date:     r.report_date,
+      day_short:       r.day_short,
+      important_issues: r.important_issues || '',
+      next_day_plan:   r.next_day_plan || '',
+      redmineTasks:    redmineTasks,
+      status:          r.status,
+      created_at:      r.created_at,
+      updated_at:      r.updated_at,
+    };
+  });
+}
+
+// Save a single day task report as draft
+function saveTaskReportDraft(payload) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  if (!payload || !payload.date) return { error: 'データが不足しています' };
+
+  var sheet = getSheet(SHEET_TASK_REPORTS);
+  var data  = sheet.getDataRange().getValues();
+  var empCol  = TASK_REPORT_H.indexOf('employee_id');
+  var dateCol = TASK_REPORT_H.indexOf('report_date');
+  var statusCol = TASK_REPORT_H.indexOf('status');
+
+  var existingRow = -1;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][empCol]) === String(user.id) &&
+        _dateStr(data[i][dateCol]) === String(payload.date)) {
+      existingRow = i;
+      break;
+    }
+  }
+
+  var existingId = existingRow > -1 ? String(data[existingRow][TASK_REPORT_H.indexOf('id')]) : null;
+  var existingStatus = existingRow > -1 ? String(data[existingRow][statusCol]) : null;
+
+  if (existingStatus && existingStatus !== 'draft' && existingStatus !== 'rejected') {
+    return { error: 'すでに申請済みのため上書きできません', status: existingStatus };
+  }
+
+  var updates = {
+    day_short:        payload.dayShort || '',
+    important_issues: payload.importantIssues || '',
+    next_day_plan:    payload.nextDayPlan || '',
+    redmine_tasks:    JSON.stringify(payload.redmineTasks || []),
+    status:           'draft',
+    updated_at:       _now(),
+  };
+
+  if (existingRow > -1) {
+    _updateRow(SHEET_TASK_REPORTS, existingId, updates, TASK_REPORT_H);
+    return { success: true, status: 'draft', id: existingId };
+  } else {
+    var r = {
+      id:               _uuid(),
+      employee_id:      user.id,
+      report_date:      payload.date,
+      day_short:        payload.dayShort || '',
+      important_issues: payload.importantIssues || '',
+      next_day_plan:    payload.nextDayPlan || '',
+      redmine_tasks:    JSON.stringify(payload.redmineTasks || []),
+      status:           'draft',
+      created_at:       _now(),
+      updated_at:       _now(),
+    };
+    _appendRow(SHEET_TASK_REPORTS, r, TASK_REPORT_H);
+    return { success: true, status: 'draft', id: r.id };
+  }
+}
+
+// Submit a single day task report (individual only, no combined)
+function submitTaskReport(payload) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  if (!payload || !payload.date) return { error: 'データが不足しています' };
+
+  var sheet = getSheet(SHEET_TASK_REPORTS);
+  var data  = sheet.getDataRange().getValues();
+  var empCol  = TASK_REPORT_H.indexOf('employee_id');
+  var dateCol = TASK_REPORT_H.indexOf('report_date');
+  var statusCol = TASK_REPORT_H.indexOf('status');
+  var idCol   = TASK_REPORT_H.indexOf('id');
+
+  var existingRow = -1;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][empCol]) === String(user.id) &&
+        _dateStr(data[i][dateCol]) === String(payload.date)) {
+      existingRow = i;
+      break;
+    }
+  }
+
+  if (existingRow < 0) return { error: '先に下書き保存してください' };
+
+  var existingId = String(data[existingRow][idCol]);
+  var existingStatus = String(data[existingRow][statusCol]);
+
+  if (existingStatus !== 'draft') {
+    return { error: 'この日報は既に申請済みです', status: existingStatus };
+  }
+
+  _updateRow(SHEET_TASK_REPORTS, existingId, { status: 'submitted', updated_at: _now() }, TASK_REPORT_H);
+
+  // Create approval records
+  var emp = getUserById(user.id);
+  if (emp && emp.department_id) {
+    var allUsers = getAllUsers();
+    var reviewer = allUsers.find(function (u) {
+      return u.role === 'reviewer' && u.department_id === emp.department_id && u.is_active;
+    });
+    var manager = allUsers.find(function (u) {
+      return u.role === 'manager' && u.department_id === emp.department_id && u.is_active;
+    });
+    var existingApprovals = getApprovalsByReport(existingId);
+    if (existingApprovals.length === 0) {
+      if (reviewer) createApproval(existingId, reviewer.id, 1);
+      if (manager) createApproval(existingId, manager.id, 2);
+    }
+  }
+
+  return { success: true, status: 'submitted', id: existingId };
+}
+
+// Get pending task reports for reviewers/managers
+function getPendingTaskReports() {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+
+  var allTR = getAllTaskReports().filter(function (r) {
+    return r.status === 'submitted' || r.status === 'reviewer_approved';
+  });
+
+  return allTR.map(function (r) {
+    var emp  = getUserById(r.employee_id);
+    var dept = emp && emp.department_id ? getDepartmentById(emp.department_id) : null;
+    var redmineTasks = [];
+    try { redmineTasks = JSON.parse(r.redmine_tasks || '[]'); } catch (e) {}
+    var approvals = getApprovalsByReport(r.id);
+    return {
+      id:                  r.id,
+      employee_id:         r.employee_id,
+      report_date:         r.report_date,
+      day_short:           r.day_short,
+      important_issues:    r.important_issues || '',
+      next_day_plan:       r.next_day_plan || '',
+      redmineTasks:        redmineTasks,
+      status:              r.status,
+      created_at:          r.created_at,
+      employee_name:       emp ? emp.name : '不明',
+      employee_department: dept ? dept.name : '未設定',
+      approvals:           approvals,
+    };
+  });
+}
+
+// Approve a task report
+function approveTaskReportAction(reportId, comment) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+
+  var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
+  if (!report) return { error: 'レポートが見つかりません' };
+
+  var level     = (user.role === 'reviewer') ? 1 : 2;
+  var newStatus = (level === 1) ? 'reviewer_approved' : 'approved';
+  decideApproval(reportId, level, 'approved', comment);
+  _updateRow(SHEET_TASK_REPORTS, reportId, { status: newStatus, updated_at: _now() }, TASK_REPORT_H);
+  return { success: true };
+}
+
+// Reject a task report
+function rejectTaskReportAction(reportId, comment) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+
+  var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
+  if (!report) return { error: 'レポートが見つかりません' };
+
+  var level = (user.role === 'reviewer') ? 1 : 2;
+  decideApproval(reportId, level, 'rejected', comment);
+  _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'rejected', updated_at: _now() }, TASK_REPORT_H);
+  return { success: true };
+}
+
+// ── Admin History functions ───────────────────────────────────
+
+// Return all telework report rows enriched with employee / department names
+function getAdminTeleworkReports() {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  var reports = getAllReports();
+  var users   = getAllUsers();
+  var depts   = getAllDepartments();
+  return reports.map(function (r) {
+    var emp  = users.find(function (u) { return u.id === r.employee_id; }) || null;
+    var dept = (emp && emp.department_id)
+      ? depts.find(function (d) { return d.id === emp.department_id; })
+      : null;
+    return {
+      id:            r.id,
+      employee_id:   r.employee_id,
+      employee_name: emp  ? emp.name  : '不明',
+      department:    dept ? dept.name : '未設定',
+      report_type:   r.report_type  || '',
+      request_date:  r.request_date || '',
+      week_title:    r.week_title   || '',
+      start_date:    r.start_date   || '',
+      end_date:      r.end_date     || '',
+      work_type:     r.work_type    || '',
+      day_short:     r.day_short    || '',
+      notes:         r.notes        || '',
+      redmine_tasks: r.redmine_tasks || '[]',
+      status:        r.status       || '',
+      created_at:    r.created_at   || '',
+    };
+  });
+}
+
+// Return all daily task report rows enriched with employee / department names
+function getAdminTaskReports() {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  var reports = _sheetToObjects(getSheet(SHEET_TASK_REPORTS));
+  var users   = getAllUsers();
+  var depts   = getAllDepartments();
+  return reports.map(function (r) {
+    var emp  = users.find(function (u) { return u.id === r.employee_id; }) || null;
+    var dept = (emp && emp.department_id)
+      ? depts.find(function (d) { return d.id === emp.department_id; })
+      : null;
+    return {
+      id:               r.id,
+      employee_id:      r.employee_id,
+      employee_name:    emp  ? emp.name  : '不明',
+      department:       dept ? dept.name : '未設定',
+      report_date:      r.report_date      || '',
+      day_short:        r.day_short        || '',
+      important_issues: r.important_issues || '',
+      next_day_plan:    r.next_day_plan    || '',
+      redmine_tasks:    r.redmine_tasks    || '[]',
+      status:           r.status           || '',
+      created_at:       r.created_at       || '',
+    };
+  });
+}
+
+// Delete a single telework report row by id
+function adminDeleteTeleworkReport(id) {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  return _deleteRowById(SHEET_REPORTS, id);
+}
+
+// Delete a single task report row by id
+function adminDeleteTaskReport(id) {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  return _deleteRowById(SHEET_TASK_REPORTS, id);
+}
+
+// Export an array of plain objects to a new sheet in the spreadsheet
+function adminExportToSheet(rows, sheetTitle) {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  if (!rows || rows.length === 0) return { error: 'データがありません' };
+
+  var ss   = getSpreadsheet();
+  var name = sheetTitle || ('エクスポート_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd_HH-mm'));
+
+  var existing = ss.getSheetByName(name);
+  if (existing) ss.deleteSheet(existing);
+
+  var sheet   = ss.insertSheet(name);
+  var headers = Object.keys(rows[0]);
+  sheet.getRange(1, 1, 1, headers.length)
+       .setValues([headers])
+       .setFontWeight('bold')
+       .setBackground('#1e293b')
+       .setFontColor('#ffffff');
+
+  var dataRows = rows.map(function (r) {
+    return headers.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  });
+  sheet.getRange(2, 1, dataRows.length, headers.length).setValues(dataRows);
+  SpreadsheetApp.flush();
+
+  return { success: true, sheetName: name };
+}
+
+// ── Team Calendar functions ─────────────────────────────────
+
+// Returns non-draft telework reports for calendar display.
+// Admin sees all; other roles see only their own department.
+function getTeamCalendarData() {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  var reports = getAllReports();
+  var users   = getAllUsers();
+  var depts   = getAllDepartments();
+  // Determine the requesting user's department for non-admin filtering
+  var currentEmp   = users.find(function (u) { return u.id === user.id; });
+  var userDeptId   = currentEmp ? (currentEmp.department_id || '') : '';
+  return reports
+    .filter(function (r) { return r.status && r.status !== 'draft'; })
+    .filter(function (r) {
+      if (user.role === 'admin') return true;
+      var emp = users.find(function (u) { return u.id === r.employee_id; });
+      return emp && emp.department_id === userDeptId;
+    })
+    .map(function (r) {
+      var emp  = users.find(function (u) { return u.id === r.employee_id; }) || null;
+      var dept = (emp && emp.department_id)
+        ? depts.find(function (d) { return d.id === emp.department_id; })
+        : null;
+      return {
+        id:            r.id,
+        employee_name: emp  ? emp.name  : '不明',
+        department:    dept ? dept.name : '未設定',
+        department_id: emp  ? (emp.department_id || '') : '',
+        request_date:  r.request_date || '',
+        work_type:     r.work_type    || 'テレワーク',
+        day_short:     r.day_short    || '',
+        status:        r.status       || '',
+      };
+    });
+}
+
+// Returns departments list for the calendar filter dropdown.
+// Only admin receives the full list; others receive an empty array.
+function getTeamCalendarDepartments() {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  if (user.role !== 'admin') return [];
+  return getAllDepartments().map(function (d) {
+    return { id: d.id, name: d.name };
+  });
+}
+
+// Helper: delete a sheet row whose 'id' column matches the given id
+function _deleteRowById(sheetName, id) {
+  var sheet = getSheet(sheetName);
+  var data  = sheet.getDataRange().getValues();
+  if (data.length === 0) return false;
+  var idCol = data[0].indexOf('id');
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]) === String(id)) {
+      sheet.deleteRow(i + 1);
+      return true;
+    }
+  }
+  return false;
 }
 
 // ── Seed initial data (called by setupSheets) ─────────────────

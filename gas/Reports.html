@@ -7,6 +7,13 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 h-screen flex overflow-hidden">
+<!-- Loading overlay -->
+<div id="pageLoader" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center">
+  <div class="flex flex-col items-center gap-3">
+    <div class="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+    <p class="text-white text-sm font-medium">読み込み中...</p>
+  </div>
+</div>
 <!-- GAS template vars – rendered by server, invisible to user -->
 <div id="gasVars" data-user='<?!= user ?>' data-url="<?= scriptUrl ?>" style="display:none"></div>
 
@@ -115,30 +122,37 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
 
   var items = [
     {
-      label: APP_USER.role === 'employee' ? '申請一覧' : '申請承認',
-      page:  APP_USER.role === 'employee' ? 'reports'  : 'approve',
+      label: '在宅勤務許可申請',
+      page:  'reports',
       color: 'text-emerald-400',
       icon:  '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
-      active: true,
     },
     {
-      label: '申請履歴', page: 'history', color: 'text-sky-400',
-      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>',
+      label: '日報報告', page: 'task_report', color: 'text-orange-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/>',
     },
     {
-      label: 'Team Calendar', page: 'calendar', color: 'text-violet-400',
+      label: 'チームカレンダー', page: 'calendar', color: 'text-violet-400',
       icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>',
-    },
-    {
-      label: 'Analytics', page: 'analytics', color: 'text-amber-400',
-      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>',
-    },
+    }
   ];
+  
+   if (APP_USER.role !== 'employee') {
+    items.push({
+      label: '申請承認', page: 'approve', color: 'text-emerald-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    });
+  }
 
   if (APP_USER.role === 'admin') {
+
     items.push({
-      label: 'Employees', page: 'employees', color: 'text-pink-400',
+      label: '社員マスタ管理', page: 'employees', color: 'text-pink-400',
       icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>',
+    });
+    items.push({
+      label: '申請履歴', page: 'admin_history', color: 'text-red-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>',
     });
   }
 
@@ -155,6 +169,13 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
     a.innerHTML =
       '<svg class="w-4 h-4 flex-shrink-0 ' + item.color + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
       item.icon + '</svg>' + item.label;
+    if (!item.active) {
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        document.getElementById('pageLoader').classList.remove('hidden');
+        window.top.location.href = SCRIPT_URL + '?page=' + item.page;
+      });
+    }
     nav.appendChild(a);
   });
 })();
@@ -331,7 +352,7 @@ function statusBadgeHtml(status) {
     submitted:         { label: '申請中',     cls: 'bg-orange-100 text-orange-700' },
     reviewer_approved: { label: '確認中',     cls: 'bg-yellow-100 text-yellow-700' },
     approved:          { label: '承認済',     cls: 'bg-green-100 text-green-700' },
-    rejected:          { label: '却下',       cls: 'bg-red-100 text-red-700' },
+    rejected:          { label: '差戻し',       cls: 'bg-red-100 text-red-700' },
   };
   var s = map[status] || map.none;
   return '<span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ' +
@@ -426,9 +447,8 @@ function openDetailPanel(d, dayShort, idx, weekReport) {
       '<label class="text-xs font-medium text-slate-700 block mb-1">勤務種別</label>' +
       '<select id="workType_' + idx + '" ' +
         'class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">' +
-        '<option value="テレワーク"'  + (data.workType === 'テレワーク'  ? ' selected' : '') + '>テレワーク</option>' +
+        '<option value="在宅勤務"'  + (data.workType === '在宅勤務'  ? ' selected' : '') + '>在宅勤務</option>' +
         '<option value="オフィス勤務"' + (data.workType === 'オフィス勤務' ? ' selected' : '') + '>オフィス勤務</option>' +
-        '<option value="休暇"'        + (data.workType === '休暇'        ? ' selected' : '') + '>休暇</option>' +
       '</select>' +
     '</div>' +
     // Notes textarea
@@ -810,8 +830,9 @@ function submitWeek() {
 
 // ── Logout ────────────────────────────────────────────────────
 function logout() {
+  document.getElementById('pageLoader').classList.remove('hidden');
   google.script.run
-    .withSuccessHandler(function (r) { window.location.replace(r.redirectUrl); })
+    .withSuccessHandler(function (r) { window.top.location.href = r.redirectUrl; })
     .logoutUser();
 }
 </script>

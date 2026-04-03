@@ -44,6 +44,10 @@ function doGet(e) {
     return renderPage('Reports', user);
   }
 
+  if (page === 'task_report') {
+    return renderPage('TaskReport', user);
+  }
+
   if (page === 'approve') {
     if (user.role === 'reviewer' || user.role === 'manager' || user.role === 'admin') {
       return renderPage('Approve', user);
@@ -56,6 +60,17 @@ function doGet(e) {
       return renderPage('Employees', user);
     }
     return _renderDefault(user); // not authorised → their own default
+  }
+
+  if (page === 'admin_history') {
+    if (user.role === 'admin') {
+      return renderPage('AdminHistory', user);
+    }
+    return _renderDefault(user); // not authorised → their own default
+  }
+
+  if (page === 'calendar') {
+    return renderPage('Calendar', user);
   }
 
   // Unknown page → role default
@@ -209,7 +224,7 @@ function getOpenIssuesByUserId(userId) {
 // Called by Reports.html syncRedmine(). Returns either:
 //   [{id, subject, project, tracker, status, priority, dueDate}, ...]
 //   { error: '<message>' }  on auth / lookup failure
-function _getRedmineTasks() {
+function getRedmineTasks() {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
 
@@ -231,6 +246,96 @@ function _getRedmineTasks() {
       dueDate:  issue.due_date || '',
     };
   });
+}
+
+// ── Fetch Redmine time entries updated on a given date for a user ──
+// Returns issues where the user logged time on the given date,
+// with hours worked and progress percentage.
+function getRedmineTimeEntries(dateStr) {
+  //const todayJST = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd");
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+
+  var redmineUserId = getUserIdByEmail(user.email);
+  if (!redmineUserId) {
+    return { error: 'Redmineアカウントが見つかりません（メール: ' + user.email + '）' };
+  }
+
+  // Fetch time entries for this user on the given date
+  var allEntries = [];
+  var offset = 0;
+  var limit = 100;
+  var totalCount = null;
+
+  do {
+    var url = REDMINE_URL + '/time_entries.json'
+      + '?user_id=' + redmineUserId
+      + '&from=' + dateStr
+      + '&to=' + dateStr
+      + '&limit=' + limit
+      + '&offset=' + offset;
+
+    var response = UrlFetchApp.fetch(url, {
+      method: 'GET',
+      headers: { 'X-Redmine-API-Key': API_KEY },
+      muteHttpExceptions: true
+    });
+
+    var data = JSON.parse(response.getContentText());
+    if (totalCount === null) totalCount = data.total_count || 0;
+    allEntries = allEntries.concat(data.time_entries || []);
+    offset += limit;
+  } while (offset < totalCount);
+
+  // Group by issue and sum hours
+  var issueMap = {};
+  allEntries.forEach(function (entry) {
+    if (!entry.issue) return;
+    var iid = entry.issue.id;
+    if (!issueMap[iid]) {
+      issueMap[iid] = { id: iid, hours: 0, activity: '', comments: [] };
+    }
+    issueMap[iid].hours += entry.hours || 0;
+    if (entry.activity) issueMap[iid].activity = entry.activity.name;
+    if (entry.comments) issueMap[iid].comments.push(entry.comments);
+  });
+
+  // Fetch issue details (subject, project, done_ratio) for each
+  var result = [];
+  var issueIds = Object.keys(issueMap);
+  for (var i = 0; i < issueIds.length; i++) {
+    var iid = issueIds[i];
+    try {
+      var iResp = UrlFetchApp.fetch(REDMINE_URL + '/issues/' + iid + '.json', {
+        method: 'GET',
+        headers: { 'X-Redmine-API-Key': API_KEY },
+        muteHttpExceptions: true
+      });
+      var iData = JSON.parse(iResp.getContentText());
+      var issue = iData.issue || {};
+      result.push({
+        id:        parseInt(iid),
+        subject:   issue.subject || '',
+        project:   issue.project  ? issue.project.name  : '',
+        tracker:   issue.tracker  ? issue.tracker.name  : '',
+        status:    issue.status   ? issue.status.name   : '',
+        priority:  issue.priority ? issue.priority.name : '',
+        progress:  issue.done_ratio || 0,
+        hours:     Math.round(issueMap[iid].hours * 100) / 100,
+        activity:  issueMap[iid].activity,
+        comments:  issueMap[iid].comments,
+      });
+    } catch (e) {
+      result.push({
+        id: parseInt(iid), subject: '(取得失敗)', project: '', tracker: '',
+        status: '', priority: '', progress: 0,
+        hours: Math.round(issueMap[iid].hours * 100) / 100,
+        activity: issueMap[iid].activity, comments: issueMap[iid].comments,
+      });
+    }
+  }
+
+  return result;
 }
 
 function main() {

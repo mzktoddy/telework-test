@@ -29,7 +29,7 @@ export const REPORT_STATUS_LABELS: Record<ReportStatus, string> = {
   submitted: "提出済み",
   reviewer_approved: "審査承認",
   approved: "最終承認",
-  rejected: "却下",
+  rejected: "差戻し",
 };
 
 export const APPROVAL_DECISIONS = {
