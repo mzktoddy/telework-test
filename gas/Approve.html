@@ -98,12 +98,12 @@
   </div>
 
   <!-- Right: detail panel -->
-  <div class="w-96 border-l border-slate-200 bg-white overflow-y-auto flex flex-col" id="detailSidebar">
-    <div class="p-6 border-b border-slate-100">
+  <div class="w-5/12 border-l border-slate-200 bg-white overflow-y-auto flex flex-col" id="detailSidebar">
+    <div class="p-8 border-b border-slate-100">
       <h2 class="text-lg font-semibold text-slate-900">申請詳細</h2>
       <p class="text-xs text-slate-500 mt-1">リクエストを選択してください</p>
     </div>
-    <div class="flex-1 p-6">
+    <div class="flex-1 p-8">
       <p class="text-sm text-slate-400">左のリストからリクエストを選択してください。</p>
     </div>
   </div>
@@ -192,10 +192,12 @@ var allReports     = [];
 var selectedReport = null;
 var _teleworkLoaded = false;
 var _taskLoaded     = false;
+var _deptsLoaded    = false;
 var _teleworkData   = [];
 var _taskData       = [];
+var _departments    = [];
 
-// ── Load both report types in parallel ────────────────────────
+// ── Load data in parallel ─────────────────────────────────────
 google.script.run
   .withSuccessHandler(function (data) {
     _teleworkData = (data && !data.error) ? data.map(function (r) { r._type = 'telework'; return r; }) : [];
@@ -214,8 +216,17 @@ google.script.run
   .withFailureHandler(function () { _taskLoaded = true; _tryFinishLoad(); })
   .getPendingTaskReports();
 
+google.script.run
+  .withSuccessHandler(function (data) {
+    _departments = (data && !data.error) ? data : [];
+    _deptsLoaded = true;
+    _tryFinishLoad();
+  })
+  .withFailureHandler(function () { _deptsLoaded = true; _tryFinishLoad(); })
+  .getApproveDepartments();
+
 function _tryFinishLoad() {
-  if (!_teleworkLoaded || !_taskLoaded) return;
+  if (!_teleworkLoaded || !_taskLoaded || !_deptsLoaded) return;
   document.getElementById('listLoading').classList.add('hidden');
   allReports = _teleworkData.concat(_taskData);
   if (!allReports.length) { showListEmpty(); return; }
@@ -229,14 +240,11 @@ function showListEmpty() {
 
 // ── Department filter ─────────────────────────────────────────
 function populateDeptFilter() {
-  var depts   = {};
-  var sel     = document.getElementById('deptFilter');
-  allReports.forEach(function (r) {
-    if (r.employee_department) depts[r.employee_department] = true;
-  });
-  Object.keys(depts).forEach(function (d) {
+  var sel = document.getElementById('deptFilter');
+  _departments.forEach(function (d) {
     var o = document.createElement('option');
-    o.value = d; o.textContent = d;
+    o.value = d.name;
+    o.textContent = d.name;
     sel.appendChild(o);
   });
   sel.addEventListener('change', renderList);
@@ -326,7 +334,7 @@ function makeRequestCard(r) {
       openTaskReportDetail(r);
     });
   } else {
-    // Telework request card — existing logic
+    // Telework request card — weekly grouping
     var tasksHtml = '';
     if (Array.isArray(r.tasks) && r.tasks.length) {
       tasksHtml = '<div class="mt-3 space-y-1">' +
@@ -365,95 +373,110 @@ function makeRequestCard(r) {
     card.addEventListener('click', function () {
       selectedReport = r;
       renderList();
-      openDetail(r);
+      openTeleworkDetail(r);
     });
   }
   return card;
 }
 
-// ── Detail panel ──────────────────────────────────────────────
-function openDetail(r) {
-  var s   = STATUS_MAP[r.status] || STATUS_MAP.none;
+// ── Telework detail panel (single day) ───────────────────────
+function openTeleworkDetail(r) {
   var sidebar = document.getElementById('detailSidebar');
 
-  // Per-day tasks with status badges
-  var tasksHtml = '';
+  // Build individual day cards — each day in r.tasks is one row from telework_reports
+  var dayCardsHtml = '';
   if (Array.isArray(r.tasks) && r.tasks.length) {
-    tasksHtml = '<div class="space-y-3">' +
-      r.tasks.map(function (t) {
-        var dayInfo = (t.date || '') + ' (' + (t.dayShort || '') + ')';
-        var dayBadge = statusBadge(t.status || r.status);
-        var noteText = t.notes ? ('<p class="text-xs text-slate-700 mt-1">' + escapeHtml(t.notes) + '</p>') : '';
-        return '<div class="bg-slate-50 rounded-lg p-3 border border-slate-100">' +
-          '<div class="flex items-center justify-between mb-1">' +
-            '<p class="text-xs font-semibold text-slate-800">' + escapeHtml(dayInfo) + '</p>' +
-            dayBadge +
-          '</div>' +
-          '<p class="text-xs text-slate-500">勤務種別: ' + escapeHtml(t.workType || 'テレワーク') + '</p>' +
-          noteText +
-        '</div>';
-      }).join('') +
-      '</div>';
-  } else {
-    tasksHtml = '<p class="text-xs text-slate-400">業務内容の記載なし</p>';
-  }
+    // Sort tasks by date ascending
+    var sorted = r.tasks.slice().sort(function (a, b) {
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    });
+    dayCardsHtml = sorted.map(function (day) {
 
-  // Approval summary
-  var approvalHtml = '';
-  if (Array.isArray(r.approvals) && r.approvals.length) {
-    approvalHtml = '<div>' +
-      '<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">承認状況</p>' +
-      '<div class="space-y-2">' +
-      r.approvals.map(function (a) {
-        var levelLabel = String(a.level) === '1' ? 'レビュアー' : 'マネージャー';
-        var decBadge = a.decision === 'approved' ? statusBadge('approved') :
-                       a.decision === 'rejected' ? statusBadge('rejected') :
-                       '<span class="text-xs text-slate-400">未確認</span>';
-        return '<div class="flex items-center justify-between bg-slate-50 rounded p-2">' +
-          '<span class="text-xs text-slate-600">' + levelLabel + '</span>' +
-          decBadge +
-        '</div>';
-      }).join('') +
-      '</div></div>';
+      // Redmine tasks section for this day
+      var redmineHtml = '';
+      if (Array.isArray(day.redmineTasks) && day.redmineTasks.length) {
+        redmineHtml =
+          '<div class="mt-3">' +
+            '<p class="text-xs font-medium text-slate-500 mb-2">Redmine作業実績</p>' +
+            '<div class="space-y-1.5">' +
+            day.redmineTasks.map(function (t) {
+              return '<div class="bg-white rounded-lg p-2.5 border border-slate-200 text-xs">' +
+                '<div class="font-medium text-slate-900 truncate">#' + escapeHtml(String(t.id || '')) + ' ' + escapeHtml(t.subject || '') + '</div>' +
+                '<div class="flex flex-wrap gap-2 mt-1 text-slate-500">' +
+                  (t.project ? '<span class="truncate max-w-[120px]">' + escapeHtml(t.project) + '</span>' : '') +
+                  '<span class="font-medium text-blue-700">⏱ ' + (t.hours || 0) + 'h</span>' +
+                  '<span class="font-medium text-emerald-700">進捗: ' + (t.progress || 0) + '%</span>' +
+                '</div>' +
+              '</div>';
+            }).join('') +
+            '</div>' +
+          '</div>';
+      }
+
+      return '<div class="bg-slate-50 rounded-xl p-4 border border-slate-200">' +
+        // Day header
+        '<div class="flex items-center justify-between mb-3">' +
+          '<div>' +
+            '<p class="text-sm font-semibold text-slate-900">' +
+              escapeHtml(day.date || '') + ' (' + escapeHtml(day.dayShort || '') + ')' +
+            '</p>' +
+            '<p class="text-xs text-slate-500 mt-0.5">' + escapeHtml(day.workType || 'テレワーク') + '</p>' +
+          '</div>' +
+          statusBadge(day.status) +
+        '</div>' +
+        // Business notes
+        (day.notes
+          ? '<div class="mb-3">' +
+              '<p class="text-xs font-medium text-slate-500 mb-1">業務内容</p>' +
+              '<p class="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">' + escapeHtml(day.notes) + '</p>' +
+            '</div>'
+          : '') +
+        redmineHtml +
+      '</div>';
+    }).join('');
+  } else {
+    dayCardsHtml = '<p class="text-sm text-slate-400">申請日がありません</p>';
   }
 
   sidebar.innerHTML =
-    '<div class="p-6 border-b border-slate-100">' +
-      '<h2 class="text-lg font-semibold text-slate-900">申請詳細</h2>' +
+    '<div class="p-8 border-b border-slate-100">' +
+      '<h2 class="text-lg font-semibold text-slate-900">テレワーク申請詳細</h2>' +
       '<div class="flex items-center gap-2 mt-2">' +
+        '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700">テレワーク</span>' +
         statusBadge(r.status) +
-        '<span class="text-xs text-slate-500">' + escapeHtml(r.week_title || '') + '</span>' +
       '</div>' +
-      '<p class="text-xs text-slate-400 mt-1">' + (r.start_date || '') + ' ～ ' + (r.end_date || '') + '</p>' +
+      '<p class="text-xs text-slate-400 mt-1">' +
+        escapeHtml(r.week_title || '') + '　' + (r.start_date || '') + ' 〜 ' + (r.end_date || '') +
+      '</p>' +
     '</div>' +
-    '<div class="flex-1 p-6 space-y-5 overflow-y-auto">' +
-      '<div>' +
+    '<div class="flex-1 p-8 overflow-y-auto">' +
+      '<div class="mb-5">' +
         '<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">申請者</p>' +
         '<p class="text-sm font-semibold text-slate-900">' + escapeHtml(r.employee_name) + '</p>' +
         '<p class="text-xs text-slate-500">' + escapeHtml(r.employee_department) + '</p>' +
       '</div>' +
-      '<div>' +
-        '<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">申請日一覧 (' + (r.tasks ? r.tasks.length : 0) + '日)</p>' +
-        tasksHtml +
-      '</div>' +
-      approvalHtml +
-      '<div>' +
-        '<label class="text-xs font-medium text-slate-700 block mb-1">承認者コメント</label>' +
+      '<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">' +
+        '申請日一覧 (' + (r.tasks ? r.tasks.length : 0) + '日)' +
+      '</p>' +
+      '<div class="space-y-4 mb-6">' + dayCardsHtml + '</div>' +
+      // Single comment and approve/reject for entire request
+      '<div class="border-t border-slate-200 pt-5 mt-5">' +
+        '<label class="text-xs font-medium text-slate-700 block mb-2">承認者コメント</label>' +
         '<textarea id="approverComment" rows="3" placeholder="コメントを入力（任意）" ' +
           'class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm resize-none ' +
-          'focus:outline-none focus:ring-2 focus:ring-blue-300"></textarea>' +
+          'focus:outline-none focus:ring-2 focus:ring-blue-300 mb-3"></textarea>' +
+        '<div class="flex gap-3">' +
+          '<button onclick="doReject(\'' + r.id + '\')" ' +
+            'class="flex-1 h-10 border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">' +
+            '差戻し' +
+          '</button>' +
+          '<button onclick="doApprove(\'' + r.id + '\')" ' +
+            'class="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-sm font-medium transition-colors">' +
+            '承認 ✓' +
+          '</button>' +
+        '</div>' +
+        '<div id="actionMsg" class="hidden text-sm text-center p-2 rounded-md mt-3"></div>' +
       '</div>' +
-      '<div class="flex gap-2">' +
-        '<button onclick="doReject(\'' + r.id + '\')" ' +
-          'class="flex-1 h-10 border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">' +
-          '差戻し' +
-        '</button>' +
-        '<button onclick="doApprove(\'' + r.id + '\')" ' +
-          'class="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-sm font-medium transition-colors">' +
-          '承認 ✓' +
-        '</button>' +
-      '</div>' +
-      '<div id="actionMsg" class="hidden text-sm text-center p-2 rounded-md"></div>' +
     '</div>';
 }
 
@@ -500,7 +523,7 @@ function openTaskReportDetail(r) {
   }
 
   sidebar.innerHTML =
-    '<div class="p-6 border-b border-slate-100">' +
+    '<div class="p-8 border-b border-slate-100">' +
       '<h2 class="text-lg font-semibold text-slate-900">日報詳細</h2>' +
       '<div class="flex items-center gap-2 mt-2">' +
         '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-orange-50 text-orange-700">日報</span>' +
@@ -508,7 +531,7 @@ function openTaskReportDetail(r) {
       '</div>' +
       '<p class="text-xs text-slate-400 mt-1">' + (r.report_date || '') + ' (' + (r.day_short || '') + ')</p>' +
     '</div>' +
-    '<div class="flex-1 p-6 space-y-5 overflow-y-auto">' +
+    '<div class="flex-1 p-8 space-y-5 overflow-y-auto">' +
       '<div>' +
         '<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">報告者</p>' +
         '<p class="text-sm font-semibold text-slate-900">' + escapeHtml(r.employee_name) + '</p>' +
@@ -551,35 +574,99 @@ function openTaskReportDetail(r) {
 function doApprove(reportId) {
   var comment = (document.getElementById('approverComment') || {}).value || '';
   var isTaskReport = selectedReport && selectedReport._type === 'task_report';
-  var runner = google.script.run
-    .withSuccessHandler(function (r) {
-      if (r && r.error) { showActionMsg(r.error, false); return; }
-      showActionMsg('承認しました！', true);
-      reloadReports();
-    })
-    .withFailureHandler(function () { showActionMsg('エラーが発生しました', false); });
+  
   if (isTaskReport) {
-    runner.approveTaskReportAction(reportId, comment);
+    // Task report - single day approval
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.error) { showActionMsg(r.error, false); return; }
+        showActionMsg('承認しました！', true);
+        reloadReports();
+      })
+      .withFailureHandler(function () { showActionMsg('エラーが発生しました', false); })
+      .approveTaskReportAction(reportId, comment);
   } else {
-    runner.approveReportAction(reportId, comment);
+    // Telework - approve all days in the week
+    if (!selectedReport || !selectedReport.tasks || !selectedReport.tasks.length) {
+      showActionMsg('申請日が見つかりません', false);
+      return;
+    }
+    
+    showActionMsg('承認処理中...', true);
+    var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
+    approveAllDays(dayIds, comment, 0);
   }
+}
+
+function approveAllDays(dayIds, comment, index) {
+  if (index >= dayIds.length) {
+    showActionMsg('すべての日を承認しました！', true);
+    setTimeout(function() { reloadReports(); }, 1000);
+    return;
+  }
+  
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.error) {
+        showActionMsg('エラー: ' + r.error, false);
+        return;
+      }
+      // Approve next day
+      approveAllDays(dayIds, comment, index + 1);
+    })
+    .withFailureHandler(function () {
+      showActionMsg('エラーが発生しました', false);
+    })
+    .approveReportAction(dayIds[index], comment);
 }
 
 function doReject(reportId) {
   var comment = (document.getElementById('approverComment') || {}).value || '';
   var isTaskReport = selectedReport && selectedReport._type === 'task_report';
-  var runner = google.script.run
-    .withSuccessHandler(function (r) {
-      if (r && r.error) { showActionMsg(r.error, false); return; }
-      showActionMsg('差戻ししました', true);
-      reloadReports();
-    })
-    .withFailureHandler(function () { showActionMsg('エラーが発生しました', false); });
+  
   if (isTaskReport) {
-    runner.rejectTaskReportAction(reportId, comment);
+    // Task report - single day rejection
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.error) { showActionMsg(r.error, false); return; }
+        showActionMsg('差戻ししました', true);
+        reloadReports();
+      })
+      .withFailureHandler(function () { showActionMsg('エラーが発生しました', false); })
+      .rejectTaskReportAction(reportId, comment);
   } else {
-    runner.rejectReportAction(reportId, comment);
+    // Telework - reject all days in the week
+    if (!selectedReport || !selectedReport.tasks || !selectedReport.tasks.length) {
+      showActionMsg('申請日が見つかりません', false);
+      return;
+    }
+    
+    showActionMsg('差戻し処理中...', true);
+    var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
+    rejectAllDays(dayIds, comment, 0);
   }
+}
+
+function rejectAllDays(dayIds, comment, index) {
+  if (index >= dayIds.length) {
+    showActionMsg('すべての日を差戻ししました', true);
+    setTimeout(function() { reloadReports(); }, 1000);
+    return;
+  }
+  
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.error) {
+        showActionMsg('エラー: ' + r.error, false);
+        return;
+      }
+      // Reject next day
+      rejectAllDays(dayIds, comment, index + 1);
+    })
+    .withFailureHandler(function () {
+      showActionMsg('エラーが発生しました', false);
+    })
+    .rejectReportAction(dayIds[index], comment);
 }
 
 function showActionMsg(msg, ok) {
@@ -628,7 +715,13 @@ function _tryReloadFinish() {
   if (!allReports.length) { showListEmpty(); return; }
   renderList();
   document.getElementById('detailSidebar').innerHTML =
-    '<div class="p-6"><p class="text-sm text-slate-400">リクエストを選択してください。</p></div>';
+    '<div class="p-6 border-b border-slate-100">' +
+      '<h2 class="text-lg font-semibold text-slate-900">申請詳細</h2>' +
+      '<p class="text-xs text-slate-500 mt-1">リクエストを選択してください</p>' +
+    '</div>' +
+    '<div class="flex-1 p-6">' +
+      '<p class="text-sm text-slate-400">左のリストからリクエストを選択してください。</p>' +
+    '</div>';
 }
 
 // ── Logout ────────────────────────────────────────────────────

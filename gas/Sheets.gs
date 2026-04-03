@@ -313,6 +313,10 @@ function getPendingReports() {
   if (!user) return { error: 'Unauthorized' };
   var dayRecords = getReportsByStatus('submitted').concat(getReportsByStatus('reviewer_approved'));
   
+  // Get user's department for filtering
+  var userDept = user.department_id ? getDepartmentById(user.department_id) : null;
+  var userDeptId = userDept ? userDept.id : null;
+  
   // Group day records by start_date, end_date, and employee_id to reconstruct weeks
   var weekMap = {};
   dayRecords.forEach(function (r) {
@@ -321,47 +325,37 @@ function getPendingReports() {
       var emp  = getUserById(r.employee_id);
       var dept = emp && emp.department_id ? getDepartmentById(emp.department_id) : null;
       weekMap[key] = {
-        id:          r.id, // Use first day's ID (for compat with approvals)
+        id:          r.id,
         employee_id: r.employee_id,
+        employee_department_id: dept ? dept.id : '',
         report_type: r.report_type,
         start_date:  r.start_date,
         end_date:    r.end_date,
         week_title:  r.week_title,
         status:      r.status,
         tasks:       [],
-        reportIds:   [], // collect all day record IDs for approval lookup
         created_at:  r.created_at,
         updated_at:  r.updated_at,
         employee_name:       emp  ? emp.name  : '不明',
         employee_department: dept ? dept.name : '未設定',
-        approvals:           [],
       };
     }
-    // Reconstruct day task from individual columns (getPendingReports)
+    // Reconstruct day task from individual columns
     var dayTask = {
+      id:           r.id,
       date:         r.request_date,
       dayShort:     r.day_short || '',
       workType:     r.work_type || 'テレワーク',
       notes:        r.notes || '',
       status:       r.status,
       redmineTasks: [],
+      approvals:    [],
     };
     try {
       dayTask.redmineTasks = JSON.parse(r.redmine_tasks || '[]');
     } catch (e) {}
+    dayTask.approvals = getApprovalsByReport(r.id);
     weekMap[key].tasks.push(dayTask);
-    weekMap[key].reportIds.push(r.id);
-  });
-  Object.keys(weekMap).forEach(function (k) {
-    var wk = weekMap[k];
-    var allApprovals = [];
-    // wk.reportIds contains all day record IDs in this week
-    (wk.reportIds || []).forEach(function (rid) {
-      var aprs = getApprovalsByReport(rid);
-      aprs.forEach(function (a) { allApprovals.push(a); });
-    });
-    wk.approvals = allApprovals;
-    delete wk.reportIds; // cleanup — don't send to client
   });
   
   // Compute aggregate week status
@@ -374,11 +368,21 @@ function getPendingReports() {
     else                                                                           wk.status = 'submitted';
     return wk;
   });
+  
+  // Filter by department based on user role
+  var filtered = weeks.filter(function (w) {
+    if (user.role === 'admin') return true;
+    if (user.role === 'reviewer' || user.role === 'manager') {
+      return w.employee_department_id === userDeptId;
+    }
+    return false;
+  });
+  
   // Sort by start_date descending
-  weeks.sort(function (a, b) {
+  filtered.sort(function (a, b) {
     return new Date(b.start_date).getTime() - new Date(a.start_date).getTime();
   });
-  return weeks;
+  return filtered;
 }
 
 function getAllEmployees() {
@@ -554,22 +558,15 @@ function approveReportAction(reportId, comment) {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
   
-  // Find the report and get its week range
+  // Find the single day report
   var report = getAllReports().find(function (r) { return r.id === reportId; });
   if (!report) return { error: 'レポートが見つかりません' };
   
-  // Update all records for this week (compare dates as strings)
-  var allRpts = getAllReports();
-  allRpts.forEach(function (r) {
-    if (String(r.employee_id) === String(report.employee_id) &&
-        String(r.start_date)  === String(report.start_date) &&
-        String(r.end_date)    === String(report.end_date)) {
-      var level     = (user.role === 'reviewer') ? 1 : 2;
-      var newStatus = (level === 1) ? 'reviewer_approved' : 'approved';
-      decideApproval(r.id, level, 'approved', comment);
-      updateReportStatus(r.id, newStatus);
-    }
-  });
+  // Update only this single day record
+  var level     = (user.role === 'reviewer') ? 1 : 2;
+  var newStatus = (level === 1) ? 'reviewer_approved' : 'approved';
+  decideApproval(reportId, level, 'approved', comment);
+  updateReportStatus(reportId, newStatus);
   
   return { success: true };
 }
@@ -578,21 +575,14 @@ function rejectReportAction(reportId, comment) {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
   
-  // Find the report and get its week range
+  // Find the single day report
   var report = getAllReports().find(function (r) { return r.id === reportId; });
   if (!report) return { error: 'レポートが見つかりません' };
   
-  // Update all records for this week (compare dates as strings)
-  var allRpts = getAllReports();
-  allRpts.forEach(function (r) {
-    if (String(r.employee_id) === String(report.employee_id) &&
-        String(r.start_date)  === String(report.start_date) &&
-        String(r.end_date)    === String(report.end_date)) {
-      var level = (user.role === 'reviewer') ? 1 : 2;
-      decideApproval(r.id, level, 'rejected', comment);
-      updateReportStatus(r.id, 'rejected');
-    }
-  });
+  // Update only this single day record
+  var level = (user.role === 'reviewer') ? 1 : 2;
+  decideApproval(reportId, level, 'rejected', comment);
+  updateReportStatus(reportId, 'rejected');
   
   return { success: true };
 }
@@ -616,6 +606,29 @@ function addEmployee(data) {
 
 function getDepartmentList() {
   return getAllDepartments();
+}
+
+function getApproveDepartments() {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  var depts = getAllDepartments();
+  
+  // Admin can see all departments
+  if (user.role === 'admin') {
+    return depts.map(function (d) {
+      return { id: d.id, name: d.name };
+    });
+  }
+  
+  // Reviewer and Manager can only see their own department
+  if (user.role === 'reviewer' || user.role === 'manager') {
+    if (user.department_id) {
+      var dept = depts.find(function (d) { return d.id === user.department_id; });
+      if (dept) return [{ id: dept.id, name: dept.name }];
+    }
+  }
+  
+  return [];
 }
 
 // ── Task Reports (日報) ───────────────────────────────────────
@@ -766,11 +779,15 @@ function getPendingTaskReports() {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
 
+  // Get user's department for filtering
+  var userDept = user.department_id ? getDepartmentById(user.department_id) : null;
+  var userDeptId = userDept ? userDept.id : null;
+
   var allTR = getAllTaskReports().filter(function (r) {
     return r.status === 'submitted' || r.status === 'reviewer_approved';
   });
 
-  return allTR.map(function (r) {
+  var mapped = allTR.map(function (r) {
     var emp  = getUserById(r.employee_id);
     var dept = emp && emp.department_id ? getDepartmentById(emp.department_id) : null;
     var redmineTasks = [];
@@ -779,6 +796,7 @@ function getPendingTaskReports() {
     return {
       id:                  r.id,
       employee_id:         r.employee_id,
+      employee_department_id: dept ? dept.id : '',
       report_date:         r.report_date,
       day_short:           r.day_short,
       important_issues:    r.important_issues || '',
@@ -790,6 +808,18 @@ function getPendingTaskReports() {
       employee_department: dept ? dept.name : '未設定',
       approvals:           approvals,
     };
+  });
+  
+  // Filter by department based on user role
+  return mapped.filter(function (r) {
+    // Admin can see all
+    if (user.role === 'admin') return true;
+    // Reviewer and Manager can only see their department
+    if (user.role === 'reviewer' || user.role === 'manager') {
+      return r.employee_department_id === userDeptId;
+    }
+    // Employee role shouldn't access this, but just in case
+    return false;
   });
 }
 
