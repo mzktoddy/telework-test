@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>テレワーク・プロ | 承認</title>
+  <title>在宅勤務・プロ | 承認</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 h-screen flex overflow-hidden">
@@ -307,7 +307,7 @@ function makeRequestCard(r) {
 
   var typeLabel = r._type === 'task_report'
     ? '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-orange-50 text-orange-700 mr-1">日報</span>'
-    : '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 mr-1">テレワーク</span>';
+    : '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 mr-1">在宅勤務</span>';
 
   if (r._type === 'task_report') {
     // Task report card — single day
@@ -341,7 +341,7 @@ function makeRequestCard(r) {
         r.tasks.slice(0, 3).map(function (t) {
           var dayBadge = statusBadge(t.status || r.status);
           var dayLabel = (t.date || '') + ' (' + (t.dayShort || '') + ')';
-          var preview = t.notes ? t.notes.substring(0, 25) + '...' : (t.workType || 'テレワーク');
+          var preview = t.notes ? t.notes.substring(0, 25) + '...' : (t.workType || '在宅勤務');
           return '<div class="flex items-center gap-2 text-xs text-slate-600">' +
             dayBadge +
             '<span class="font-medium">' + escapeHtml(dayLabel) + '</span>' +
@@ -420,7 +420,7 @@ function openTeleworkDetail(r) {
             '<p class="text-sm font-semibold text-slate-900">' +
               escapeHtml(day.date || '') + ' (' + escapeHtml(day.dayShort || '') + ')' +
             '</p>' +
-            '<p class="text-xs text-slate-500 mt-0.5">' + escapeHtml(day.workType || 'テレワーク') + '</p>' +
+            '<p class="text-xs text-slate-500 mt-0.5">' + escapeHtml(day.workType || '在宅勤務') + '</p>' +
           '</div>' +
           statusBadge(day.status) +
         '</div>' +
@@ -440,9 +440,9 @@ function openTeleworkDetail(r) {
 
   sidebar.innerHTML =
     '<div class="p-8 border-b border-slate-100">' +
-      '<h2 class="text-lg font-semibold text-slate-900">テレワーク申請詳細</h2>' +
+      '<h2 class="text-lg font-semibold text-slate-900">在宅勤務申請詳細</h2>' +
       '<div class="flex items-center gap-2 mt-2">' +
-        '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700">テレワーク</span>' +
+        '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700">在宅勤務</span>' +
         statusBadge(r.status) +
       '</div>' +
       '<p class="text-xs text-slate-400 mt-1">' +

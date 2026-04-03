@@ -189,12 +189,12 @@ function createReport(employeeId, reportType, startDate, endDate, requestDate, w
   var r = {
     id:          _uuid(),
     employee_id: employeeId,
-    report_type: reportType || 'テレワーク',
+    report_type: reportType || '在宅勤務',
     start_date:  startDate,
     end_date:    endDate,
     request_date: requestDate,
     week_title:  weekTitle,
-    work_type:   workType || 'テレワーク',
+    work_type:   workType || '在宅勤務',
     day_short:   dayShort || '',
     notes:       notes || '',
     redmine_tasks: JSON.stringify(redmineTasks || []),
@@ -279,7 +279,7 @@ function getMyReports() {
     var dayTask = {
       date:         r.request_date,
       dayShort:     r.day_short || '',
-      workType:     r.work_type || 'テレワーク',
+      workType:     r.work_type || '在宅勤務',
       notes:        r.notes || '',
       status:       r.status,   // per-day status for UI badge
       redmineTasks: [],
@@ -345,7 +345,7 @@ function getPendingReports() {
       id:           r.id,
       date:         r.request_date,
       dayShort:     r.day_short || '',
-      workType:     r.work_type || 'テレワーク',
+      workType:     r.work_type || '在宅勤務',
       notes:        r.notes || '',
       status:       r.status,
       redmineTasks: [],
@@ -452,7 +452,7 @@ function saveDayDraft(dayPayload) {
   if (existingRow > -1) {
     // Update existing row in-place
     var updates = {
-      work_type:     dayPayload.workType  || 'テレワーク',
+      work_type:     dayPayload.workType  || '在宅勤務',
       day_short:     dayPayload.dayShort  || '',
       notes:         dayPayload.notes     || '',
       redmine_tasks: JSON.stringify(dayPayload.redmineTasks || []),
@@ -466,12 +466,12 @@ function saveDayDraft(dayPayload) {
     // Create a new draft record
     var r = createReport(
       user.id,
-      'テレワーク',
+      '在宅勤務',
       dayPayload.startDate,
       dayPayload.endDate,
       dayPayload.date,
       weekTitle,
-      dayPayload.workType  || 'テレワーク',
+      dayPayload.workType  || '在宅勤務',
       dayPayload.dayShort  || '',
       dayPayload.notes     || '',
       dayPayload.redmineTasks || [],
@@ -988,7 +988,7 @@ function getTeamCalendarData() {
         department:    dept ? dept.name : '未設定',
         department_id: emp  ? (emp.department_id || '') : '',
         request_date:  r.request_date || '',
-        work_type:     r.work_type    || 'テレワーク',
+        work_type:     r.work_type    || '在宅勤務',
         day_short:     r.day_short    || '',
         status:        r.status       || '',
       };

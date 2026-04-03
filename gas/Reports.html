@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>テレワーク・プロ | 申請</title>
+  <title>在宅勤務・プロ | 申請</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 h-screen flex overflow-hidden">
@@ -244,7 +244,7 @@ var availableTasks = {}; // Store fetched Redmine tasks by day index
 
 function makeFreshDayData() {
   return [0,1,2,3,4].map(function () {
-    return { workType: 'テレワーク', notes: '', redmineTasks: [], edited: false, savedStatus: null };
+    return { workType: '在宅勤務', notes: '', redmineTasks: [], edited: false, savedStatus: null };
   });
 }
 
@@ -309,7 +309,7 @@ function renderWeek() {
       var taskDate = new Date(dayTask.date + 'T00:00:00'); // parse as local date
       var dayIndex = Math.round((taskDate - mon) / 86400000);
       if (dayIndex >= 0 && dayIndex < 5) {
-        tempData[dayIndex].workType     = dayTask.workType     || 'テレワーク';
+        tempData[dayIndex].workType     = dayTask.workType     || '在宅勤務';
         tempData[dayIndex].notes        = dayTask.notes        || '';
         tempData[dayIndex].redmineTasks = dayTask.redmineTasks || [];
         tempData[dayIndex].edited       = true; // saved to sheet

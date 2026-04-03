@@ -52,7 +52,7 @@ export default function LoginForm() {
           </div>
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">テレワーク・プロ</h1>
+          <h1 className="text-2xl font-bold tracking-tight">在宅勤務・プロ</h1>
           <p className="text-xs text-gray-500 mt-1">社内報告システム</p>
         </div>
         <div className="pt-4">
