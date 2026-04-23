@@ -3,8 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>在宅勤務・プロ | チームカレンダー</title>
+  <title>在宅勤務報告システム</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      font-family: 'Noto Sans JP', sans-serif;
+    }
+    
+    body {
+      font-size: 16px;
+      line-height: 1.8;  
+    }
+  </style>
 </head>
 <body class="bg-slate-50 h-screen flex overflow-hidden">
 
@@ -171,6 +182,10 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
 
   var items = [
     {
+      label: 'ダッシュボード', page: 'dashboard', color: 'text-blue-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>',
+    },
+    {
       label: '在宅勤務許可申請', page: 'reports', color: 'text-emerald-400',
       icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
     },
@@ -284,8 +299,8 @@ function _checkReady() {
   if (!_dataReady || !_deptsReady) return;
   document.getElementById('calLoading').classList.add('hidden');
   document.getElementById('calWrap').classList.remove('hidden');
-  // Hide dept filter for non-admin users (server already filters their data)
-  if (APP_USER && APP_USER.role !== 'admin') {
+  // Hide dept filter only for employees (admins, managers, and reviewers can see it)
+  if (APP_USER && APP_USER.role === 'employee') {
     var dfWrap = document.getElementById('deptFilter');
     if (dfWrap) dfWrap.style.display = 'none';
   }
@@ -331,9 +346,29 @@ function goToday() {
 // ── Dept filter ───────────────────────────────────────────────
 function applyFilter() {
   var deptId = document.getElementById('deptFilter').value;
-  _filtered  = deptId
-    ? _allData.filter(function (r) { return r.department_id === deptId; })
-    : _allData.slice();
+  if (!deptId) {
+    _filtered = _allData.slice();
+  } else {
+    // Filter considering employees can belong to multiple departments
+    _filtered = _allData.filter(function (r) {
+      if (!r.department_id) return false;
+      
+      // Parse department_id (could be JSON array or single ID)
+      var empDeptIds = [];
+      try {
+        if (r.department_id.startsWith('[')) {
+          empDeptIds = JSON.parse(r.department_id);
+        } else {
+          empDeptIds = [r.department_id];
+        }
+      } catch (e) {
+        empDeptIds = [r.department_id];
+      }
+      
+      // Check if selected department is in employee's departments
+      return empDeptIds.indexOf(deptId) !== -1;
+    });
+  }
   renderCalendar();
 }
 
@@ -442,7 +477,7 @@ function _statusChip(status) {
     approved:          ['承認', 'bg-green-500/25 text-green-300'],
     submitted:         ['申請中', 'bg-orange-500/25 text-orange-300'],
     reviewer_approved: ['審査済', 'bg-blue-500/25 text-blue-300'],
-    rejected:          ['差戻し',  'bg-red-500/25 text-red-300'],
+    rejected:          ['差戻',  'bg-red-500/25 text-red-300'],
   };
   var info = MAP[status] || ['‐', 'bg-slate-500/25 text-slate-400'];
   return '<span class="flex-shrink-0 text-[10px] px-1 py-0.5 rounded whitespace-nowrap ' +

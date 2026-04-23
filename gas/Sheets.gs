@@ -113,12 +113,27 @@ function _updateRow(sheetName, id, updates, headers) {
 function _uuid()  { return Utilities.getUuid(); }
 function _now()   { return new Date().toISOString(); }
 
-// Calculate week title like "第13週"
+// Calculate week title like "第13週" (Sunday-based week)
 function _getWeekTitle(dateStr) {
   var date = new Date(dateStr);
   var startOfYear = new Date(date.getFullYear(), 0, 1);
-  var days = Math.floor((date - startOfYear) / (24 * 60 * 60 * 1000));
-  var weekNumber = Math.ceil((days + startOfYear.getDay() + 1) / 7);
+  
+  // Find the first Sunday of the year
+  var firstSunday = new Date(startOfYear);
+  var dayOfWeek = startOfYear.getDay();
+  if (dayOfWeek !== 0) {
+    firstSunday.setDate(startOfYear.getDate() + (7 - dayOfWeek));
+  }
+  
+  // If date is before first Sunday, it's week 1
+  if (date < firstSunday) {
+    return '第1週';
+  }
+  
+  // Calculate week number from first Sunday
+  var daysSinceFirstSunday = Math.floor((date - firstSunday) / (24 * 60 * 60 * 1000));
+  var weekNumber = Math.floor(daysSinceFirstSunday / 7) + 1;
+  
   return '第' + weekNumber + '週';
 }
 
@@ -154,14 +169,64 @@ function getUserByEmail(email) {
 function getUserById(id) {
   return getAllUsers().find(function (u) { return u.id === id; }) || null;
 }
-function createUser(name, email, role, departmentId, plainPassword) {
+function getUsersByDepartment(departmentId) {
+  if (!departmentId) return [];
+  return getAllUsers().filter(function(u) {
+    if (!u.department_id) return false;
+    // Handle both single ID string and JSON array of IDs
+    try {
+      var deptIds = JSON.parse(u.department_id);
+      return Array.isArray(deptIds) && deptIds.indexOf(departmentId) >= 0;
+    } catch (e) {
+      return String(u.department_id) === String(departmentId);
+    }
+  });
+}
+function getUsersByDepartments(departmentIds) {
+  if (!departmentIds || departmentIds.length === 0) return [];
+  var allUsers = getAllUsers();
+  var userMap = {}; // Use object to deduplicate users
+  
+  departmentIds.forEach(function(deptId) {
+    allUsers.forEach(function(u) {
+      if (!u.department_id) return;
+      // Check if user belongs to this department
+      try {
+        var userDeptIds = JSON.parse(u.department_id);
+        if (Array.isArray(userDeptIds) && userDeptIds.indexOf(deptId) >= 0) {
+          userMap[u.id] = u;
+        }
+      } catch (e) {
+        if (String(u.department_id) === String(deptId)) {
+          userMap[u.id] = u;
+        }
+      }
+    });
+  });
+  
+  // Convert map back to array
+  var result = [];
+  for (var id in userMap) {
+    result.push(userMap[id]);
+  }
+  return result;
+}
+function createUser(name, email, role, departmentIds, plainPassword) {
+  // departmentIds can be a string (single ID), array of IDs, or empty
+  var deptIdStr = '';
+  if (Array.isArray(departmentIds)) {
+    deptIdStr = JSON.stringify(departmentIds);
+  } else if (departmentIds) {
+    deptIdStr = departmentIds;
+  }
+  
   var u = {
     id:            _uuid(),
     email:         email,
     password_hash: plainPassword ? hashPassword(plainPassword) : 'GWS_AUTH_ONLY',
     name:          name,
     role:          role,                  // employee | reviewer | manager | admin
-    department_id: departmentId || '',
+    department_id: deptIdStr,
     is_active:     true,
     created_at:    _now(),
     updated_at:    _now(),
@@ -297,7 +362,7 @@ function getMyReports() {
     var statuses = wk.tasks.map(function (t) { return t.status || 'draft'; });
     if (statuses.every(function (s) { return s === 'approved'; }))          wk.status = 'approved';
     else if (statuses.some(function (s) { return s === 'rejected'; }))       wk.status = 'rejected';
-    else if (statuses.some(function (s) { return s === 'reviewer_approved'; })) wk.status = 'reviewer_approved';
+    else if (statuses.some(function (s) { return s === 'reviewed'; }))       wk.status = 'reviewed';
     else if (statuses.some(function (s) { return s === 'submitted'; }))      wk.status = 'submitted';
     else                                                                      wk.status = 'draft';
     return wk;
@@ -311,23 +376,54 @@ function getMyReports() {
 function getPendingReports() {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
-  var dayRecords = getReportsByStatus('submitted').concat(getReportsByStatus('reviewer_approved'));
+  var dayRecords = getReportsByStatus('submitted').concat(getReportsByStatus('reviewed'));
   
-  // Get user's department for filtering
-  var userDept = user.department_id ? getDepartmentById(user.department_id) : null;
-  var userDeptId = userDept ? userDept.id : null;
+  // Get user's departments for filtering (support multiple departments)
+  var userDeptIds = [];
+  try {
+    if (user.department_id && user.department_id.trim()) {
+      if (user.department_id.startsWith('[')) {
+        userDeptIds = JSON.parse(user.department_id);
+      } else {
+        userDeptIds = [user.department_id];
+      }
+    }
+  } catch (e) {
+    userDeptIds = user.department_id ? [user.department_id] : [];
+  }
   
   // Group day records by start_date, end_date, and employee_id to reconstruct weeks
   var weekMap = {};
+  var allDepts = getAllDepartments();
   dayRecords.forEach(function (r) {
     var key = r.employee_id + '|' + r.start_date + '|' + r.end_date;
     if (!weekMap[key]) {
-      var emp  = getUserById(r.employee_id);
-      var dept = emp && emp.department_id ? getDepartmentById(emp.department_id) : null;
+      var emp = getUserById(r.employee_id);
+      
+      // Parse employee's department IDs
+      var empDeptIds = [];
+      if (emp && emp.department_id) {
+        try {
+          if (emp.department_id.startsWith('[')) {
+            empDeptIds = JSON.parse(emp.department_id);
+          } else {
+            empDeptIds = [emp.department_id];
+          }
+        } catch (e) {
+          empDeptIds = [emp.department_id];
+        }
+      }
+      
+      // Get department names
+      var deptNames = empDeptIds.map(function(id) {
+        var d = allDepts.find(function(dept) { return dept.id === id; });
+        return d ? d.name : null;
+      }).filter(function(n) { return n !== null; });
+      
       weekMap[key] = {
         id:          r.id,
         employee_id: r.employee_id,
-        employee_department_id: dept ? dept.id : '',
+        employee_department_ids: empDeptIds,
         report_type: r.report_type,
         start_date:  r.start_date,
         end_date:    r.end_date,
@@ -337,7 +433,7 @@ function getPendingReports() {
         created_at:  r.created_at,
         updated_at:  r.updated_at,
         employee_name:       emp  ? emp.name  : '不明',
-        employee_department: dept ? dept.name : '未設定',
+        employee_department: deptNames.length > 0 ? deptNames.join(', ') : '未設定',
       };
     }
     // Reconstruct day task from individual columns
@@ -364,7 +460,7 @@ function getPendingReports() {
     var statuses = wk.tasks.map(function (t) { return t.status || 'submitted'; });
     if (statuses.every(function (s) { return s === 'approved'; }))               wk.status = 'approved';
     else if (statuses.some(function (s) { return s === 'rejected'; }))            wk.status = 'rejected';
-    else if (statuses.some(function (s) { return s === 'reviewer_approved'; }))   wk.status = 'reviewer_approved';
+    else if (statuses.some(function (s) { return s === 'reviewed'; }))            wk.status = 'reviewed';
     else                                                                           wk.status = 'submitted';
     return wk;
   });
@@ -373,7 +469,11 @@ function getPendingReports() {
   var filtered = weeks.filter(function (w) {
     if (user.role === 'admin') return true;
     if (user.role === 'reviewer' || user.role === 'manager') {
-      return w.employee_department_id === userDeptId;
+      // Check if any of the user's departments match any of the employee's departments
+      if (userDeptIds.length === 0 || w.employee_department_ids.length === 0) return false;
+      return userDeptIds.some(function(userDept) {
+        return w.employee_department_ids.indexOf(userDept) !== -1;
+      });
     }
     return false;
   });
@@ -388,16 +488,37 @@ function getPendingReports() {
 function getAllEmployees() {
   var user = getCurrentUser();
   if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  var allDepts = getAllDepartments();
+  
   return getAllUsers().map(function (u) {
-    var dept = u.department_id ? getDepartmentById(u.department_id) : null;
+    // Parse department_id as JSON array or handle single ID
+    var deptIds = [];
+    try {
+      if (u.department_id && u.department_id.trim()) {
+        if (u.department_id.startsWith('[')) {
+          deptIds = JSON.parse(u.department_id);
+        } else {
+          deptIds = [u.department_id];
+        }
+      }
+    } catch (e) {
+      deptIds = u.department_id ? [u.department_id] : [];
+    }
+    
+    // Map department IDs to names
+    var deptNames = deptIds.map(function(id) {
+      var dept = allDepts.find(function(d) { return d.id === id; });
+      return dept ? dept.name : null;
+    }).filter(function(name) { return name !== null; });
+    
     return {
-      id:         u.id,
-      name:       u.name,
-      email:      u.email,
-      role:       u.role,
-      department: dept ? dept.name : '未設定',
-      is_active:  u.is_active,
-      created_at: u.created_at,
+      id:          u.id,
+      name:        u.name,
+      email:       u.email,
+      role:        u.role,
+      departments: deptNames,
+      is_active:   u.is_active,
+      created_at:  u.created_at,
     };
   });
 }
@@ -554,19 +675,91 @@ function submitWeekReport(weekData) {
   return { success: true, reports: createdReports };
 }
 
+// Review a single report (first approval step)
+function reviewReportAction(reportId, comment) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  
+  var report = getAllReports().find(function (r) { return r.id === reportId; });
+  if (!report) return { error: 'レポートが見つかりません' };
+  
+  // Only reviewers, managers, and admins can review
+  if (user.role !== 'reviewer' && user.role !== 'manager' && user.role !== 'admin') {
+    return { error: '照査権限がありません' };
+  }
+  
+  // Update status to reviewed
+  var level = 1; // Review level
+  decideApproval(reportId, level, 'approved', comment);
+  updateReportStatus(reportId, 'reviewed');
+  
+  return { success: true };
+}
+
+// Batch review all days in a week (first approval step)
+function reviewWeekReport(dayIds, comment) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  if (!dayIds || dayIds.length === 0) return { error: '申請日が見つかりません' };
+  
+  // Only reviewers, managers, and admins can review
+  if (user.role !== 'reviewer' && user.role !== 'manager' && user.role !== 'admin') {
+    return { error: '照査権限がありません' };
+  }
+  
+  var allReports = getAllReports();
+  var level = 1; // Review level
+  var firstReport = null;
+  var employee = null;
+  
+  // Review each day
+  for (var i = 0; i < dayIds.length; i++) {
+    var report = allReports.find(function (r) { return r.id === dayIds[i]; });
+    if (!report) continue;
+    if (!firstReport) {
+      firstReport = report;
+      employee = getUserById(report.employee_id);
+    }
+    decideApproval(dayIds[i], level, 'approved', comment);
+    updateReportStatus(dayIds[i], 'reviewed');
+  }
+  
+  // Send notification for the week
+  if (firstReport && employee) {
+    try {
+      sendMattermostNotification({
+        employee_name: employee.name,
+        week_title: firstReport.week_title || '',
+        start_date: firstReport.start_date || '',
+        end_date: firstReport.end_date || '',
+        approver_name: user.name,
+        decision: 'reviewed',
+        comment: comment || ''
+      });
+    } catch (e) {
+      Logger.log('Mattermost notification failed: ' + e.message);
+    }
+  }
+  
+  return { success: true };
+}
+
 function approveReportAction(reportId, comment) {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
   
-  // Find the single day report
   var report = getAllReports().find(function (r) { return r.id === reportId; });
   if (!report) return { error: 'レポートが見つかりません' };
   
-  // Update only this single day record
-  var level     = (user.role === 'reviewer') ? 1 : 2;
-  var newStatus = (level === 1) ? 'reviewer_approved' : 'approved';
+  // Only managers and admins can do final approval
+  if (user.role !== 'manager' && user.role !== 'admin') {
+    return { error: '承認権限がありません。照査のみ可能です。' };
+  }
+  
+  // Update to final approved status
+  var level = 2; // Final approval level
   decideApproval(reportId, level, 'approved', comment);
-  updateReportStatus(reportId, newStatus);
+  updateReportStatus(reportId, 'approved');
   
   return { success: true };
 }
@@ -579,10 +772,105 @@ function rejectReportAction(reportId, comment) {
   var report = getAllReports().find(function (r) { return r.id === reportId; });
   if (!report) return { error: 'レポートが見つかりません' };
   
-  // Update only this single day record
+  // Update only this single day record (no notification — use rejectWeekReport for batch)
   var level = (user.role === 'reviewer') ? 1 : 2;
   decideApproval(reportId, level, 'rejected', comment);
   updateReportStatus(reportId, 'rejected');
+  
+  return { success: true };
+}
+
+// Batch approve all days in a week and send ONE notification (final approval step)
+function approveWeekReport(dayIds, comment) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  if (!dayIds || dayIds.length === 0) return { error: '申請日が見つかりません' };
+  
+  // Only managers and admins can do final approval
+  if (user.role !== 'manager' && user.role !== 'admin') {
+    return { error: '承認権限がありません。照査のみ可能です。' };
+  }
+  
+  var allReports = getAllReports();
+  var level = 2; // Final approval level
+  var firstReport = null;
+  var employee = null;
+  
+  // Approve each day
+  for (var i = 0; i < dayIds.length; i++) {
+    var report = allReports.find(function (r) { return r.id === dayIds[i]; });
+    if (!report) continue;
+    if (!firstReport) {
+      firstReport = report;
+      employee = getUserById(report.employee_id);
+    }
+    decideApproval(dayIds[i], level, 'approved', comment);
+    updateReportStatus(dayIds[i], 'approved');
+  }
+  
+  // Send ONE notification for the whole week
+  if (firstReport && employee) {
+    try {
+      var notificationData = {
+        reportType: 'telework',
+        reportDate: firstReport.start_date,
+        weekTitle: firstReport.week_title,
+        employeeName: employee.name,
+        employeeEmail: employee.email,
+        approverName: user.name,
+        decision: 'approved',
+        reportUrl: ScriptApp.getService().getUrl() + '?page=reports',
+      };
+      sendMattermostMessage(notificationData, 'daily-report');
+    } catch (e) {
+      Logger.log('Mattermost notification failed: ' + e.toString());
+    }
+  }
+  
+  return { success: true };
+}
+
+// Batch reject all days in a week and send ONE notification
+function rejectWeekReport(dayIds, comment) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  if (!dayIds || dayIds.length === 0) return { error: '申請日が見つかりません' };
+  
+  var allReports = getAllReports();
+  var level = (user.role === 'reviewer') ? 1 : 2;
+  var firstReport = null;
+  var employee = null;
+  
+  // Reject each day
+  for (var i = 0; i < dayIds.length; i++) {
+    var report = allReports.find(function (r) { return r.id === dayIds[i]; });
+    if (!report) continue;
+    if (!firstReport) {
+      firstReport = report;
+      employee = getUserById(report.employee_id);
+    }
+    decideApproval(dayIds[i], level, 'rejected', comment);
+    updateReportStatus(dayIds[i], 'rejected');
+  }
+  
+  // Send ONE notification for the whole week
+  if (firstReport && employee) {
+    try {
+      var notificationData = {
+        reportType: 'telework',
+        reportDate: firstReport.start_date,
+        weekTitle: firstReport.week_title,
+        employeeName: employee.name,
+        employeeEmail: employee.email,
+        approverName: user.name,
+        decision: 'rejected',
+        reportUrl: ScriptApp.getService().getUrl() + '?page=reports',
+      };
+      sendMattermostMessage(notificationData, 'daily-report');
+    } catch (e) {
+      Logger.log('Mattermost notification failed: ' + e.toString());
+    }
+  }
   
   return { success: true };
 }
@@ -597,11 +885,76 @@ function toggleEmployeeStatus(userId, active) {
 function addEmployee(data) {
   var user = getCurrentUser();
   if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
-  var depts = getAllDepartments();
-  var dept  = depts.find(function (d) { return d.name === data.department; });
-  var deptId = dept ? dept.id : '';
-  var newUser = createUser(data.name, data.email, data.role, deptId, data.password || '');
+  
+  var allDepts = getAllDepartments();
+  var deptIds = [];
+  
+  // Handle departments as array
+  if (data.departments && Array.isArray(data.departments)) {
+    data.departments.forEach(function(deptName) {
+      var dept = allDepts.find(function (d) { return d.name === deptName; });
+      if (dept) deptIds.push(dept.id);
+    });
+  } else if (data.department) {
+    // Backward compatibility: single department
+    var dept = allDepts.find(function (d) { return d.name === data.department; });
+    if (dept) deptIds.push(dept.id);
+  }
+  
+  var newUser = createUser(data.name, data.email, data.role, deptIds, data.password || '');
   return { success: true, user: newUser };
+}
+
+function updateEmployee(data) {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  
+  // Validate required fields
+  if (!data.id || !data.name || !data.email || !data.role) {
+    return { error: 'Missing required fields' };
+  }
+  
+  // Check if employee exists
+  var existingUser = getUserById(data.id);
+  if (!existingUser) return { error: 'Employee not found' };
+  
+  // Get department IDs from department names
+  var deptIds = [];
+  if (data.departments && Array.isArray(data.departments) && data.departments.length > 0) {
+    var allDepts = getAllDepartments();
+    data.departments.forEach(function(deptName) {
+      var dept = allDepts.find(function (d) { return d.name === deptName; });
+      if (dept) deptIds.push(dept.id);
+    });
+  } else if (data.department) {
+    // Backward compatibility: single department
+    var allDepts = getAllDepartments();
+    var dept = allDepts.find(function (d) { return d.name === data.department; });
+    if (dept) deptIds.push(dept.id);
+  }
+  
+  // Prepare update object
+  var updates = {
+    name: data.name,
+    email: data.email,
+    role: data.role,
+    department_id: deptIds.length > 0 ? JSON.stringify(deptIds) : '',
+    updated_at: _now()
+  };
+  
+  // Only update password if provided
+  if (data.password && data.password.trim() !== '') {
+    updates.password_hash = hashPassword(data.password);
+  }
+  
+  // Update the user record
+  var success = _updateRow(SHEET_USERS, data.id, updates, USER_H);
+  
+  if (success) {
+    return { success: true };
+  } else {
+    return { error: 'Failed to update employee' };
+  }
 }
 
 function getDepartmentList() {
@@ -620,12 +973,26 @@ function getApproveDepartments() {
     });
   }
   
-  // Reviewer and Manager can only see their own department
+  // Reviewer and Manager can see their department(s)
   if (user.role === 'reviewer' || user.role === 'manager') {
-    if (user.department_id) {
-      var dept = depts.find(function (d) { return d.id === user.department_id; });
-      if (dept) return [{ id: dept.id, name: dept.name }];
+    var userDeptIds = [];
+    try {
+      if (user.department_id && user.department_id.trim()) {
+        if (user.department_id.startsWith('[')) {
+          userDeptIds = JSON.parse(user.department_id);
+        } else {
+          userDeptIds = [user.department_id];
+        }
+      }
+    } catch (e) {
+      userDeptIds = user.department_id ? [user.department_id] : [];
     }
+    
+    return depts.filter(function(d) {
+      return userDeptIds.indexOf(d.id) !== -1;
+    }).map(function(d) {
+      return { id: d.id, name: d.name };
+    });
   }
   
   return [];
@@ -757,12 +1124,48 @@ function submitTaskReport(payload) {
   // Create approval records
   var emp = getUserById(user.id);
   if (emp && emp.department_id) {
+    // Find reviewer and manager in any matching department
+    var empDeptIds = [];
+    if (emp && emp.department_id) {
+      try {
+        if (emp.department_id.startsWith('[')) {
+          empDeptIds = JSON.parse(emp.department_id);
+        } else {
+          empDeptIds = [emp.department_id];
+        }
+      } catch (e) {
+        empDeptIds = [emp.department_id];
+      }
+    }
+    
     var allUsers = getAllUsers();
     var reviewer = allUsers.find(function (u) {
-      return u.role === 'reviewer' && u.department_id === emp.department_id && u.is_active;
+      if (u.role !== 'reviewer' || !u.is_active) return false;
+      var userDeptIds = [];
+      try {
+        if (u.department_id && u.department_id.startsWith('[')) {
+          userDeptIds = JSON.parse(u.department_id);
+        } else if (u.department_id) {
+          userDeptIds = [u.department_id];
+        }
+      } catch (e) {
+        userDeptIds = u.department_id ? [u.department_id] : [];
+      }
+      return userDeptIds.some(function(d) { return empDeptIds.indexOf(d) !== -1; });
     });
     var manager = allUsers.find(function (u) {
-      return u.role === 'manager' && u.department_id === emp.department_id && u.is_active;
+      if (u.role !== 'manager' || !u.is_active) return false;
+      var userDeptIds = [];
+      try {
+        if (u.department_id && u.department_id.startsWith('[')) {
+          userDeptIds = JSON.parse(u.department_id);
+        } else if (u.department_id) {
+          userDeptIds = [u.department_id];
+        }
+      } catch (e) {
+        userDeptIds = u.department_id ? [u.department_id] : [];
+      }
+      return userDeptIds.some(function(d) { return empDeptIds.indexOf(d) !== -1; });
     });
     var existingApprovals = getApprovalsByReport(existingId);
     if (existingApprovals.length === 0) {
@@ -779,24 +1182,55 @@ function getPendingTaskReports() {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
 
-  // Get user's department for filtering
-  var userDept = user.department_id ? getDepartmentById(user.department_id) : null;
-  var userDeptId = userDept ? userDept.id : null;
+  // Get user's departments for filtering (support multiple departments)
+  var userDeptIds = [];
+  try {
+    if (user.department_id && user.department_id.trim()) {
+      if (user.department_id.startsWith('[')) {
+        userDeptIds = JSON.parse(user.department_id);
+      } else {
+        userDeptIds = [user.department_id];
+      }
+    }
+  } catch (e) {
+    userDeptIds = user.department_id ? [user.department_id] : [];
+  }
 
   var allTR = getAllTaskReports().filter(function (r) {
-    return r.status === 'submitted' || r.status === 'reviewer_approved';
+    return r.status === 'submitted' || r.status === 'reviewed';
   });
 
+  var allDepts = getAllDepartments();
   var mapped = allTR.map(function (r) {
-    var emp  = getUserById(r.employee_id);
-    var dept = emp && emp.department_id ? getDepartmentById(emp.department_id) : null;
+    var emp = getUserById(r.employee_id);
+    
+    // Parse employee's department IDs
+    var empDeptIds = [];
+    if (emp && emp.department_id) {
+      try {
+        if (emp.department_id.startsWith('[')) {
+          empDeptIds = JSON.parse(emp.department_id);
+        } else {
+          empDeptIds = [emp.department_id];
+        }
+      } catch (e) {
+        empDeptIds = [emp.department_id];
+      }
+    }
+    
+    // Get department names
+    var deptNames = empDeptIds.map(function(id) {
+      var d = allDepts.find(function(dept) { return dept.id === id; });
+      return d ? d.name : null;
+    }).filter(function(n) { return n !== null; });
+    
     var redmineTasks = [];
     try { redmineTasks = JSON.parse(r.redmine_tasks || '[]'); } catch (e) {}
     var approvals = getApprovalsByReport(r.id);
     return {
       id:                  r.id,
       employee_id:         r.employee_id,
-      employee_department_id: dept ? dept.id : '',
+      employee_department_ids: empDeptIds,
       report_date:         r.report_date,
       day_short:           r.day_short,
       important_issues:    r.important_issues || '',
@@ -805,7 +1239,7 @@ function getPendingTaskReports() {
       status:              r.status,
       created_at:          r.created_at,
       employee_name:       emp ? emp.name : '不明',
-      employee_department: dept ? dept.name : '未設定',
+      employee_department: deptNames.length > 0 ? deptNames.join(', ') : '未設定',
       approvals:           approvals,
     };
   });
@@ -814,27 +1248,135 @@ function getPendingTaskReports() {
   return mapped.filter(function (r) {
     // Admin can see all
     if (user.role === 'admin') return true;
-    // Reviewer and Manager can only see their department
+    // Reviewer and Manager can only see their department(s)
     if (user.role === 'reviewer' || user.role === 'manager') {
-      return r.employee_department_id === userDeptId;
+      // Check if any of the user's departments match any of the employee's departments
+      if (userDeptIds.length === 0 || r.employee_department_ids.length === 0) return false;
+      return userDeptIds.some(function(userDept) {
+        return r.employee_department_ids.indexOf(userDept) !== -1;
+      });
     }
     // Employee role shouldn't access this, but just in case
     return false;
   });
 }
 
-// Approve a task report
+// Review a task report (first approval step)
+function reviewTaskReportAction(reportId, comment) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  
+  var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
+  if (!report) return { error: 'レポートが見つかりません' };
+  
+  // Only reviewers, managers, and admins can review
+  if (user.role !== 'reviewer' && user.role !== 'manager' && user.role !== 'admin') {
+    return { error: '照査権限がありません' };
+  }
+  
+  var level = 1; // Review level
+  decideApproval(reportId, level, 'approved', comment);
+  _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'reviewed', updated_at: _now() }, TASK_REPORT_H);
+  
+  // Send notification
+  var employee = getUserById(report.employee_id);
+  if (employee) {
+    try {
+      sendMattermostNotification({
+        employee_name: employee.name,
+        report_date: report.report_date || '',
+        approver_name: user.name,
+        decision: 'reviewed',
+        comment: comment || '',
+        report_type: 'task_report'
+      });
+    } catch (e) {
+      Logger.log('Mattermost notification failed: ' + e.message);
+    }
+  }
+  
+  return { success: true };
+}
+
+// Approve a task report (final approval step)
+// Review a task report (first approval step)
+function reviewTaskReportAction(reportId, comment) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  
+  var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
+  if (!report) return { error: 'レポートが見つかりません' };
+  
+  // Only reviewers, managers, and admins can review
+  if (user.role !== 'reviewer' && user.role !== 'manager' && user.role !== 'admin') {
+    return { error: '照査権限がありません' };
+  }
+  
+  var employee = getUserById(report.employee_id);
+  
+  var level = 1; // Review level
+  decideApproval(reportId, level, 'approved', comment);
+  _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'reviewed', updated_at: _now() }, TASK_REPORT_H);
+  
+  // Send Mattermost notification
+  if (employee) {
+    try {
+      var notificationData = {
+        reportType: 'task',
+        reportDate: report.report_date,
+        employeeName: employee.name,
+        employeeEmail: employee.email,
+        approverName: user.name,
+        decision: 'reviewed',
+        reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
+      };
+      sendMattermostMessage(notificationData, 'daily-report');
+    } catch (e) {
+      Logger.log('Mattermost notification failed: ' + e.toString());
+    }
+  }
+  
+  return { success: true };
+}
+
+// Approve a task report (final approval step)
 function approveTaskReportAction(reportId, comment) {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
 
   var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
   if (!report) return { error: 'レポートが見つかりません' };
+  
+  // Only managers and admins can do final approval
+  if (user.role !== 'manager' && user.role !== 'admin') {
+    return { error: '承認権限がありません。照査のみ可能です。' };
+  }
+  
+  var employee = getUserById(report.employee_id);
 
-  var level     = (user.role === 'reviewer') ? 1 : 2;
-  var newStatus = (level === 1) ? 'reviewer_approved' : 'approved';
+  var level = 2; // Final approval level
   decideApproval(reportId, level, 'approved', comment);
-  _updateRow(SHEET_TASK_REPORTS, reportId, { status: newStatus, updated_at: _now() }, TASK_REPORT_H);
+  _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'approved', updated_at: _now() }, TASK_REPORT_H);
+  
+  // Send Mattermost notification
+  if (employee) {
+    try {
+      var notificationData = {
+        reportType: 'task',
+        reportDate: report.report_date,
+        employeeName: employee.name,
+        employeeEmail: employee.email,
+        approverName: user.name,
+        decision: 'approved',
+        reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
+      };
+      sendMattermostMessage(notificationData, 'daily-report');
+    } catch (e) {
+      Logger.log('Mattermost notification failed: ' + e.toString());
+      // Don't fail the approval if notification fails
+    }
+  }
+  
   return { success: true };
 }
 
@@ -845,10 +1387,33 @@ function rejectTaskReportAction(reportId, comment) {
 
   var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
   if (!report) return { error: 'レポートが見つかりません' };
+  
+  // Get employee information for notification
+  var employee = getUserById(report.employee_id);
 
   var level = (user.role === 'reviewer') ? 1 : 2;
   decideApproval(reportId, level, 'rejected', comment);
   _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'rejected', updated_at: _now() }, TASK_REPORT_H);
+  
+  // Send Mattermost notification
+  if (employee) {
+    try {
+      var notificationData = {
+        reportType: 'task',
+        reportDate: report.report_date,
+        employeeName: employee.name,
+        employeeEmail: employee.email,
+        approverName: user.name,
+        decision: 'rejected',
+        reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
+      };
+      sendMattermostMessage(notificationData, 'daily-report');
+    } catch (e) {
+      Logger.log('Mattermost notification failed: ' + e.toString());
+      // Don't fail the rejection if notification fails
+    }
+  }
+  
   return { success: true };
 }
 
@@ -895,14 +1460,33 @@ function getAdminTaskReports() {
   var depts   = getAllDepartments();
   return reports.map(function (r) {
     var emp  = users.find(function (u) { return u.id === r.employee_id; }) || null;
-    var dept = (emp && emp.department_id)
-      ? depts.find(function (d) { return d.id === emp.department_id; })
-      : null;
+    
+    // Parse employee's department IDs
+    var empDeptIds = [];
+    if (emp && emp.department_id) {
+      try {
+        if (emp.department_id.startsWith('[')) {
+          empDeptIds = JSON.parse(emp.department_id);
+        } else {
+          empDeptIds = [emp.department_id];
+        }
+      } catch (e) {
+        empDeptIds = [emp.department_id];
+      }
+    }
+    
+    // Get department names
+    var deptNames = empDeptIds.map(function(id) {
+      var d = depts.find(function(dept) { return dept.id === id; });
+      return d ? d.name : null;
+    }).filter(function(n) { return n !== null; });
+    
     return {
       id:               r.id,
       employee_id:      r.employee_id,
       employee_name:    emp  ? emp.name  : '不明',
-      department:       dept ? dept.name : '未設定',
+      department:       deptNames.length > 0 ? deptNames.join(', ') : '未設定',
+      department_id:    emp  ? (emp.department_id || '') : '',
       report_date:      r.report_date      || '',
       day_short:        r.day_short        || '',
       important_issues: r.important_issues || '',
@@ -960,50 +1544,130 @@ function adminExportToSheet(rows, sheetTitle) {
 // ── Team Calendar functions ─────────────────────────────────
 
 // Returns non-draft telework reports for calendar display.
-// Admin sees all; other roles see only their own department.
+// Admin sees all; managers/reviewers see their department(s); employees see their own department.
 function getTeamCalendarData() {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
   var reports = getAllReports();
   var users   = getAllUsers();
   var depts   = getAllDepartments();
-  // Determine the requesting user's department for non-admin filtering
-  var currentEmp   = users.find(function (u) { return u.id === user.id; });
-  var userDeptId   = currentEmp ? (currentEmp.department_id || '') : '';
+  
+  // Parse current user's department IDs
+  var currentEmp = users.find(function (u) { return u.id === user.id; });
+  var userDeptIds = [];
+  if (currentEmp && currentEmp.department_id) {
+    try {
+      if (currentEmp.department_id.startsWith('[')) {
+        userDeptIds = JSON.parse(currentEmp.department_id);
+      } else {
+        userDeptIds = [currentEmp.department_id];
+      }
+    } catch (e) {
+      userDeptIds = currentEmp.department_id ? [currentEmp.department_id] : [];
+    }
+  }
+  
   return reports
     .filter(function (r) { return r.status && r.status !== 'draft'; })
     .filter(function (r) {
+      // Admin sees all
       if (user.role === 'admin') return true;
+      
+      // For managers, reviewers, and employees: check if employee is in any of user's departments
       var emp = users.find(function (u) { return u.id === r.employee_id; });
-      return emp && emp.department_id === userDeptId;
+      if (!emp || !emp.department_id) return false;
+      
+      // Parse employee's department IDs
+      var empDeptIds = [];
+      try {
+        if (emp.department_id.startsWith('[')) {
+          empDeptIds = JSON.parse(emp.department_id);
+        } else {
+          empDeptIds = [emp.department_id];
+        }
+      } catch (e) {
+        empDeptIds = [emp.department_id];
+      }
+      
+      // Check if any of user's departments match any of employee's departments
+      return userDeptIds.some(function(userDept) {
+        return empDeptIds.indexOf(userDept) !== -1;
+      });
     })
     .map(function (r) {
-      var emp  = users.find(function (u) { return u.id === r.employee_id; }) || null;
-      var dept = (emp && emp.department_id)
-        ? depts.find(function (d) { return d.id === emp.department_id; })
-        : null;
+      var emp = users.find(function (u) { return u.id === r.employee_id; }) || null;
+      
+      // Parse employee's department IDs and get names
+      var deptNames = [];
+      if (emp && emp.department_id) {
+        var empDeptIds = [];
+        try {
+          if (emp.department_id.startsWith('[')) {
+            empDeptIds = JSON.parse(emp.department_id);
+          } else {
+            empDeptIds = [emp.department_id];
+          }
+        } catch (e) {
+          empDeptIds = emp.department_id ? [emp.department_id] : [];
+        }
+        
+        deptNames = empDeptIds.map(function(id) {
+          var d = depts.find(function(dept) { return dept.id === id; });
+          return d ? d.name : null;
+        }).filter(function(n) { return n !== null; });
+      }
+      
       return {
         id:            r.id,
-        employee_name: emp  ? emp.name  : '不明',
-        department:    dept ? dept.name : '未設定',
-        department_id: emp  ? (emp.department_id || '') : '',
+        employee_name: emp ? emp.name : '不明',
+        department:    deptNames.length > 0 ? deptNames.join(', ') : '未設定',
+        department_id: emp ? (emp.department_id || '') : '',
         request_date:  r.request_date || '',
-        work_type:     r.work_type    || '在宅勤務',
-        day_short:     r.day_short    || '',
-        status:        r.status       || '',
+        work_type:     r.work_type || '在宅勤務',
+        day_short:     r.day_short || '',
+        status:        r.status || '',
       };
     });
 }
 
 // Returns departments list for the calendar filter dropdown.
-// Only admin receives the full list; others receive an empty array.
+// Admin receives all departments; managers/reviewers receive their assigned departments.
 function getTeamCalendarDepartments() {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
-  if (user.role !== 'admin') return [];
-  return getAllDepartments().map(function (d) {
-    return { id: d.id, name: d.name };
-  });
+  var depts = getAllDepartments();
+  
+  // Admin can see all departments
+  if (user.role === 'admin') {
+    return depts.map(function (d) {
+      return { id: d.id, name: d.name };
+    });
+  }
+  
+  // Managers and reviewers can see their department(s)
+  if (user.role === 'manager' || user.role === 'reviewer') {
+    var userDeptIds = [];
+    try {
+      if (user.department_id && user.department_id.trim()) {
+        if (user.department_id.startsWith('[')) {
+          userDeptIds = JSON.parse(user.department_id);
+        } else {
+          userDeptIds = [user.department_id];
+        }
+      }
+    } catch (e) {
+      userDeptIds = user.department_id ? [user.department_id] : [];
+    }
+    
+    return depts.filter(function(d) {
+      return userDeptIds.indexOf(d.id) !== -1;
+    }).map(function(d) {
+      return { id: d.id, name: d.name };
+    });
+  }
+  
+  // Employees don't get department filter
+  return [];
 }
 
 // Helper: delete a sheet row whose 'id' column matches the given id
@@ -1019,6 +1683,152 @@ function _deleteRowById(sheetName, id) {
     }
   }
   return false;
+}
+
+// ── Admin Dashboard Summary ──────────────────────────────────
+// Returns telework conditions and daily report submission counts
+// for the current Mon–Fri week. Called from Dashboard.html.
+function getAdminDashboardData() {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+
+  // Compute Mon–Fri date strings for the current week
+  var today  = new Date();
+  var dow    = today.getDay(); // 0=Sun … 6=Sat
+  var offset = dow === 0 ? -6 : 1 - dow;
+  var monday = new Date(today);
+  monday.setDate(today.getDate() + offset);
+  monday.setHours(0, 0, 0, 0);
+
+  var weekDays = [];
+  for (var i = 0; i < 5; i++) {
+    var d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    weekDays.push(_dateStr(d));
+  }
+
+  // Total active employees
+  var totalEmployees = getAllUsers().filter(function(u) {
+    return u.role === 'employee' && u.is_active;
+  }).length;
+
+  // Telework vs office counts per day — only approved requests, all departments
+  var allReports = getAllReports();
+  var teleworkData = weekDays.map(function(date) {
+    var dayRows = allReports.filter(function(r) {
+      return _dateStr(r.request_date) === date && r.status === 'approved';
+    });
+    return {
+      date:     date,
+      telework: dayRows.filter(function(r) { return r.work_type === '在宅勤務'; }).length,
+      office:   dayRows.filter(function(r) { return r.work_type === '出社';     }).length,
+    };
+  });
+
+  // Submitted task_reports per day
+  var taskReports = _sheetToObjects(getSheet(SHEET_TASK_REPORTS));
+  var reportData = weekDays.map(function(date) {
+    var submitted = taskReports.filter(function(r) {
+      return _dateStr(r.report_date) === date && r.status !== 'draft';
+    }).length;
+    return {
+      date:      date,
+      submitted: submitted,
+      missing:   Math.max(0, totalEmployees - submitted),
+    };
+  });
+
+  return {
+    weekDays:       weekDays,
+    totalEmployees: totalEmployees,
+    teleworkData:   teleworkData,
+    reportData:     reportData,
+  };
+}
+
+// ── Department Dashboard Data (for non-admin users) ──────────
+function getDepartmentDashboardData() {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+
+  // Admin should use getAdminDashboardData instead
+  if (user.role === 'admin') {
+    return getAdminDashboardData();
+  }
+
+  // Get user's department IDs (can be multiple)
+  var userDeptIds = [];
+  if (user.department_id) {
+    try {
+      var parsed = JSON.parse(user.department_id);
+      userDeptIds = Array.isArray(parsed) ? parsed : [user.department_id];
+    } catch (e) {
+      userDeptIds = [user.department_id];
+    }
+  }
+
+  if (userDeptIds.length === 0) {
+    return { error: 'ユーザーに部門が割り当てられていません' };
+  }
+
+  // Compute Mon–Fri date strings for the current week
+  var today  = new Date();
+  var dow    = today.getDay(); // 0=Sun … 6=Sat
+  var offset = dow === 0 ? -6 : 1 - dow;
+  var monday = new Date(today);
+  monday.setDate(today.getDate() + offset);
+  monday.setHours(0, 0, 0, 0);
+
+  var weekDays = [];
+  for (var i = 0; i < 5; i++) {
+    var d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    weekDays.push(_dateStr(d));
+  }
+
+  // Get all employees from ALL user's departments
+  var deptUsers = getUsersByDepartments(userDeptIds).filter(function(u) {
+    return u.role === 'employee' && u.is_active;
+  });
+  var deptUserIds = deptUsers.map(function(u) { return u.id; });
+  var totalEmployees = deptUsers.length;
+
+  // Telework vs office counts per day — only approved requests in this department
+  var allReports = getAllReports();
+  var teleworkData = weekDays.map(function(date) {
+    var dayRows = allReports.filter(function(r) {
+      return _dateStr(r.request_date) === date && 
+             r.status === 'approved' &&
+             deptUserIds.indexOf(r.employee_id) >= 0;
+    });
+    return {
+      date:     date,
+      telework: dayRows.filter(function(r) { return r.work_type === '在宅勤務'; }).length,
+      office:   dayRows.filter(function(r) { return r.work_type === '出社';     }).length,
+    };
+  });
+
+  // Submitted task_reports per day for department employees only
+  var taskReports = _sheetToObjects(getSheet(SHEET_TASK_REPORTS));
+  var reportData = weekDays.map(function(date) {
+    var submitted = taskReports.filter(function(r) {
+      return _dateStr(r.report_date) === date && 
+             r.status !== 'draft' &&
+             deptUserIds.indexOf(r.employee_id) >= 0;
+    }).length;
+    return {
+      date:      date,
+      submitted: submitted,
+      missing:   Math.max(0, totalEmployees - submitted),
+    };
+  });
+
+  return {
+    weekDays:       weekDays,
+    totalEmployees: totalEmployees,
+    teleworkData:   teleworkData,
+    reportData:     reportData,
+  };
 }
 
 // ── Seed initial data (called by setupSheets) ─────────────────

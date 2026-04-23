@@ -3,8 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mamiya ITS| Employees</title>
+  <title>在宅勤務報告システム</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    /* 2. Apply to everything */
+    * {
+      font-family: 'Noto Sans JP', sans-serif;
+    }
+
+    body {
+      font-size: 16px;
+      line-height: 1.8;  /* wider for Japanese */
+    }
+  </style>
 </head>
 <body class="bg-slate-50 h-screen flex overflow-hidden">
 <!-- Loading overlay -->
@@ -54,12 +66,11 @@
   <!-- Header -->
   <div class="mb-8">
     <h1 class="text-3xl font-bold text-slate-900 mb-2">従業員管理</h1>
-    <p class="text-slate-600">Manage employee accounts and permissions</p>
   </div>
 
   <!-- Toolbar -->
   <div class="mb-6 flex items-center justify-between gap-4">
-    <input id="searchInput" type="text" placeholder="Search by name or email..."
+    <input id="searchInput" type="text" placeholder="名前、メール、または部署名で検索..."
       class="flex-1 max-w-md h-10 px-3 py-2 border border-slate-300 rounded-lg text-sm
              focus:outline-none focus:ring-2 focus:ring-blue-300" />
     <button onclick="openAddModal()"
@@ -94,11 +105,11 @@
   <div id="feedbackMsg" class="hidden mt-4 text-sm text-center p-3 rounded-md max-w-md"></div>
 </main>
 
-<!-- ═══════════════════════ ADD EMPLOYEE MODAL ═══════════════════════ -->
+<!-- ═══════════════════════ ADD/EDIT EMPLOYEE MODAL ═══════════════════════ -->
 <div id="addModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
   <div class="bg-white rounded-xl shadow-xl w-full max-w-md">
     <div class="p-6 border-b border-slate-100 flex items-center justify-between">
-      <h3 class="text-lg font-semibold text-slate-900">Add Employee</h3>
+      <h3 id="modalTitle" class="text-lg font-semibold text-slate-900">Add Employee</h3>
       <button onclick="closeAddModal()" class="text-slate-400 hover:text-slate-600">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -115,8 +126,8 @@
         <input id="newEmail" type="email" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
       </div>
       <div>
-        <label class="text-xs font-medium text-slate-700 block mb-1">部署</label>
-        <select id="newDept" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"></select>
+        <label class="text-xs font-medium text-slate-700 block mb-2">部署（複数選択可能）</label>
+        <div id="newDept" class="w-full max-h-40 overflow-y-auto border border-slate-300 rounded-md p-2 bg-white space-y-1"></div>
       </div>
       <div>
         <label class="text-xs font-medium text-slate-700 block mb-1">ロール *</label>
@@ -159,6 +170,10 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
   document.getElementById('sidebarEmail').textContent = APP_USER.email;
 
   var items = [
+    {
+      label: 'ダッシュボード', page: 'dashboard', color: 'text-blue-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>',
+    },
     {
       label: '在宅勤務許可申請', page: 'reports', color: 'text-emerald-400',
       icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
@@ -210,6 +225,7 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
 // ── State ─────────────────────────────────────────────────────
 var allEmployees = [];
 var departments  = [];
+var editingEmployeeId = null; // Track if we're editing
 
 // ── Load data ─────────────────────────────────────────────────
 google.script.run
@@ -228,15 +244,32 @@ google.script.run
 google.script.run
   .withSuccessHandler(function (data) {
     departments = data || [];
-    var sel = document.getElementById('newDept');
-    sel.innerHTML = '<option value="">未設定</option>';
-    departments.forEach(function (d) {
-      var o = document.createElement('option');
-      o.value = d.name; o.textContent = d.name;
-      sel.appendChild(o);
-    });
+    renderDepartmentCheckboxes();
   })
   .getDepartmentList();
+
+function renderDepartmentCheckboxes() {
+  var container = document.getElementById('newDept');
+  container.innerHTML = '';
+  if (departments.length === 0) {
+    container.innerHTML = '<p class="text-xs text-slate-500 py-2">部署がありません</p>';
+    return;
+  }
+  departments.forEach(function (d) {
+    var label = document.createElement('label');
+    label.className = 'flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer';
+    var checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = d.name;
+    checkbox.className = 'dept-checkbox w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-2 focus:ring-blue-300';
+    var span = document.createElement('span');
+    span.textContent = d.name;
+    span.className = 'text-sm text-slate-700';
+    label.appendChild(checkbox);
+    label.appendChild(span);
+    container.appendChild(label);
+  });
+}
 
 var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; // Replace with your file ID
 google.script.run
@@ -253,7 +286,16 @@ google.script.run
 document.getElementById('searchInput').addEventListener('input', function () {
   var q = this.value.toLowerCase();
   var filtered = allEmployees.filter(function (e) {
-    return e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q);
+    // Search by name, email, or department names
+    var nameMatch = e.name.toLowerCase().includes(q);
+    var emailMatch = e.email.toLowerCase().includes(q);
+    var deptMatch = false;
+    if (e.departments && Array.isArray(e.departments)) {
+      deptMatch = e.departments.some(function(dept) {
+        return dept.toLowerCase().includes(q);
+      });
+    }
+    return nameMatch || emailMatch || deptMatch;
   });
   renderTable(filtered);
 });
@@ -266,6 +308,13 @@ var ROLE_COLORS = {
   admin:    'bg-rose-100 text-rose-700',
 };
 
+var ROLE_LABELS = {
+  admin:    '管理者',
+  manager:  '部門長',
+  reviewer: '直属上長',
+  employee: '一般社員',
+};
+
 function renderTable(data) {
   var tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
@@ -275,6 +324,7 @@ function renderTable(data) {
   }
   data.forEach(function (emp) {
     var rc  = ROLE_COLORS[emp.role] || 'bg-slate-100 text-slate-700';
+    var roleLabel = ROLE_LABELS[emp.role] || emp.role;
     var row = document.createElement('tr');
     row.className = 'hover:bg-slate-50 transition-colors';
     row.innerHTML =
@@ -287,10 +337,18 @@ function renderTable(data) {
         '</div>' +
       '</td>' +
       '<td class="px-6 py-4 text-sm text-slate-600">' + esc(emp.email) + '</td>' +
-      '<td class="px-6 py-4 text-sm text-slate-600">' + esc(emp.department) + '</td>' +
+      '<td class="px-6 py-4 text-sm text-slate-600">' + 
+        '<div class="flex flex-wrap gap-1">' + 
+          (emp.departments && emp.departments.length > 0 
+            ? emp.departments.map(function(d) { 
+                return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">' + esc(d) + '</span>';
+              }).join('') 
+            : '<span class="text-slate-400">未設定</span>') + 
+        '</div>' +
+      '</td>' +
       '<td class="px-6 py-4">' +
         '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ' + rc + '">' +
-          esc(emp.role) +
+          esc(roleLabel) +
         '</span>' +
       '</td>' +
       '<td class="px-6 py-4">' +
@@ -299,10 +357,16 @@ function renderTable(data) {
           : '<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-500">○ Inactive</span>') +
       '</td>' +
       '<td class="px-6 py-4">' +
-        '<button onclick="toggleStatus(\'' + emp.id + '\',' + !emp.is_active + ')" ' +
-          'class="text-xs text-blue-600 hover:text-blue-800 font-medium">' +
-          (emp.is_active ? '無効化' : '有効化') +
-        '</button>' +
+        '<div class="flex items-center gap-3">' +
+          '<button onclick="openEditModal(\'' + emp.id + '\')" ' +
+            'class="text-xs text-blue-600 hover:text-blue-800 font-medium">' +
+            '編集' +
+          '</button>' +
+          '<button onclick="toggleStatus(\'' + emp.id + '\',' + !emp.is_active + ')" ' +
+            'class="text-xs text-blue-600 hover:text-blue-800 font-medium">' +
+            (emp.is_active ? '無効化' : '有効化') +
+          '</button>' +
+        '</div>' +
       '</td>';
     tbody.appendChild(row);
   });
@@ -314,6 +378,18 @@ function esc(s) {
 
 // ── Toggle status ─────────────────────────────────────────────
 function toggleStatus(userId, active) {
+  // Find employee name for confirmation message
+  var employee = allEmployees.find(function(e) { return e.id === userId; });
+  var empName = employee ? employee.name : 'この従業員';
+  
+  // Show confirmation dialog
+  var action = active ? '有効化' : '無効化';
+  var message = empName + ' を' + action + 'しますか？';
+  
+  if (!confirm(message)) {
+    return; // User cancelled
+  }
+  
   google.script.run
     .withSuccessHandler(function (r) {
       if (r && r.error) { showFeedback(r.error, false); return; }
@@ -324,13 +400,48 @@ function toggleStatus(userId, active) {
     .toggleEmployeeStatus(userId, active);
 }
 
-// ── Add Employee modal ────────────────────────────────────────
+// ── Add/Edit Employee modal ───────────────────────────────────
 function openAddModal() {
+  editingEmployeeId = null;
+  document.getElementById('modalTitle').textContent = 'Add Employee';
+  document.getElementById('saveBtn').textContent = '追加する';
+  document.getElementById('addModal').classList.remove('hidden');
+  document.getElementById('modalError').classList.add('hidden');
+  ['newName','newEmail','newPassword'].forEach(function (id) {
+    document.getElementById(id).value = '';
+  });
+  // Uncheck all department checkboxes
+  var checkboxes = document.querySelectorAll('.dept-checkbox');
+  checkboxes.forEach(function(cb) { cb.checked = false; });
+  document.getElementById('newRole').value = 'employee';
+}
+
+function openEditModal(employeeId) {
+  editingEmployeeId = employeeId;
+  var emp = allEmployees.find(function (e) { return e.id === employeeId; });
+  if (!emp) return;
+  
+  document.getElementById('modalTitle').textContent = 'Edit Employee';
+  document.getElementById('saveBtn').textContent = '更新する';
+  document.getElementById('newName').value = emp.name || '';
+  document.getElementById('newEmail').value = emp.email || '';
+  
+  // Set department checkboxes
+  var checkboxes = document.querySelectorAll('.dept-checkbox');
+  checkboxes.forEach(function(cb) {
+    cb.checked = emp.departments && emp.departments.indexOf(cb.value) !== -1;
+  });
+  
+  document.getElementById('newRole').value = emp.role || 'employee';
+  document.getElementById('newPassword').value = '';
+  
   document.getElementById('addModal').classList.remove('hidden');
   document.getElementById('modalError').classList.add('hidden');
 }
+
 function closeAddModal() {
   document.getElementById('addModal').classList.add('hidden');
+  editingEmployeeId = null;
   ['newName','newEmail','newPassword'].forEach(function (id) {
     document.getElementById(id).value = '';
   });
@@ -339,7 +450,14 @@ function closeAddModal() {
 function saveEmployee() {
   var name  = document.getElementById('newName').value.trim();
   var email = document.getElementById('newEmail').value.trim();
-  var dept  = document.getElementById('newDept').value;
+  
+  // Get selected departments from checkboxes
+  var selectedDepts = [];
+  var checkboxes = document.querySelectorAll('.dept-checkbox:checked');
+  checkboxes.forEach(function(cb) {
+    selectedDepts.push(cb.value);
+  });
+  
   var role  = document.getElementById('newRole').value;
   var pass  = document.getElementById('newPassword').value;
 
@@ -349,21 +467,41 @@ function saveEmployee() {
   }
 
   var btn = document.getElementById('saveBtn');
-  btn.disabled = true; btn.textContent = '追加中...';
+  var isEdit = editingEmployeeId !== null;
+  btn.disabled = true;
+  btn.textContent = isEdit ? '更新中...' : '追加中...';
 
-  google.script.run
-    .withSuccessHandler(function (r) {
-      btn.disabled = false; btn.textContent = '追加する';
-      if (r && r.error) { showModalError(r.error); return; }
-      closeAddModal();
-      showFeedback(name + ' を追加しました', true);
-      reloadEmployees();
-    })
-    .withFailureHandler(function () {
-      btn.disabled = false; btn.textContent = '追加する';
-      showModalError('エラーが発生しました');
-    })
-    .addEmployee({ name: name, email: email, department: dept, role: role, password: pass });
+  if (isEdit) {
+    // Update existing employee
+    google.script.run
+      .withSuccessHandler(function (r) {
+        btn.disabled = false; btn.textContent = '更新する';
+        if (r && r.error) { showModalError(r.error); return; }
+        closeAddModal();
+        showFeedback(name + ' を更新しました', true);
+        reloadEmployees();
+      })
+      .withFailureHandler(function () {
+        btn.disabled = false; btn.textContent = '更新する';
+        showModalError('エラーが発生しました');
+      })
+      .updateEmployee({ id: editingEmployeeId, name: name, email: email, departments: selectedDepts, role: role, password: pass });
+  } else {
+    // Add new employee
+    google.script.run
+      .withSuccessHandler(function (r) {
+        btn.disabled = false; btn.textContent = '追加する';
+        if (r && r.error) { showModalError(r.error); return; }
+        closeAddModal();
+        showFeedback(name + ' を追加しました', true);
+        reloadEmployees();
+      })
+      .withFailureHandler(function () {
+        btn.disabled = false; btn.textContent = '追加する';
+        showModalError('エラーが発生しました');
+      })
+      .addEmployee({ name: name, email: email, departments: selectedDepts, role: role, password: pass });
+  }
 }
 
 function showModalError(msg) {

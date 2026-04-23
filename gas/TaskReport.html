@@ -3,8 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>在宅勤務・プロ | 日報報告</title>
+  <title>在宅勤務報告システム</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      font-family: 'Noto Sans JP', sans-serif;
+    }
+    
+    body {
+      font-size: 16px;
+      line-height: 1.8;  
+    }
+  </style>
 </head>
 <body class="bg-slate-50 h-screen flex overflow-hidden">
 <!-- Loading overlay -->
@@ -104,6 +115,10 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
 
   var items = [
     {
+      label: 'ダッシュボード', page: 'dashboard', color: 'text-blue-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>',
+    },
+    {
       label: '在宅勤務許可申請', page: 'reports', color: 'text-emerald-400',
       icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
     },
@@ -165,19 +180,24 @@ google.script.run
   .getImageAsBase64(logoFileId);
 
 // ── Week helpers ──────────────────────────────────────────────
-function getISOWeek(d) {
-  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  var y = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d - y) / 86400000 + 1) / 7);
+function getWeekNumber(d) {
+  var startOfYear = new Date(d.getFullYear(), 0, 1);
+  var firstSunday = new Date(startOfYear);
+  var dayOfWeek = startOfYear.getDay();
+  if (dayOfWeek !== 0) {
+    firstSunday.setDate(startOfYear.getDate() + (7 - dayOfWeek));
+  }
+  if (d < firstSunday) return 1;
+  var daysSinceFirstSunday = Math.floor((d - firstSunday) / 86400000);
+  return Math.floor(daysSinceFirstSunday / 7) + 1;
 }
-function getMondayOfWeek(offset) {
+function getSundayOfWeek(offset) {
   var today = new Date();
-  var day = today.getDay() || 7;
-  var monday = new Date(today);
-  monday.setDate(today.getDate() - day + 1 + offset * 7);
-  monday.setHours(0, 0, 0, 0);
-  return monday;
+  var day = today.getDay();
+  var sunday = new Date(today);
+  sunday.setDate(today.getDate() - day + offset * 7);
+  sunday.setHours(0, 0, 0, 0);
+  return sunday;
 }
 function fmtDate(d) {
   return d.getFullYear() + '/' +
@@ -197,15 +217,15 @@ function escapeHtml(str) {
 
 // ── Populate week selector (current + 3 past weeks for reporting) ─
 var weekSel    = document.getElementById('weekSelect');
-var DAY_SHORTS = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+var DAY_SHORTS = ['日', '月', '火', '水', '木', '金', '土'];
 
 for (var w = -3; w <= 0; w++) {
-  var mon = getMondayOfWeek(w);
-  var fri = new Date(mon); fri.setDate(mon.getDate() + 4);
+  var sun = getSundayOfWeek(w);
+  var sat = new Date(sun); sat.setDate(sun.getDate() + 6);
   var opt = document.createElement('option');
   opt.value = w;
-  opt.textContent = '第' + getISOWeek(mon) + '週　' +
-    fmtDate(mon) + '（月）～' + fmtDate(fri) + '（金）';
+  opt.textContent = '第' + getWeekNumber(sun) + '週　' +
+    fmtDate(sun) + '（日）～' + fmtDate(sat) + '（土）';
   if (w === 0) opt.selected = true;
   weekSel.appendChild(opt);
 }
@@ -216,7 +236,7 @@ var myTaskReports  = [];
 var dayData        = makeFreshDayData();
 
 function makeFreshDayData() {
-  return [0,1,2,3,4].map(function () {
+  return [0,1,2,3,4,5,6].map(function () {
     return { importantIssues: '', nextDayPlan: '', redmineTasks: [], edited: false, savedStatus: null };
   });
 }
@@ -252,20 +272,20 @@ weekSel.addEventListener('change', function () {
 // ── Render week ───────────────────────────────────────────────
 function renderWeek() {
   var offset = parseInt(weekSel.value) || 0;
-  var mon    = getMondayOfWeek(offset);
-  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
-  var weekNo = getISOWeek(mon);
+  var sun    = getSundayOfWeek(offset);
+  var sat    = new Date(sun); sat.setDate(sun.getDate() + 6);
+  var weekNo = getWeekNumber(sun);
 
   document.getElementById('weekLabel').textContent = '第' + weekNo + '週';
-  document.getElementById('weekRange').textContent = fmtDate(mon) + ' ～ ' + fmtDate(fri);
+  document.getElementById('weekRange').textContent = fmtDate(sun) + ' ～ ' + fmtDate(sat);
   document.getElementById('monthLabel').textContent =
-    mon.getFullYear() + '年' + String(mon.getMonth() + 1).padStart(2, '0') + '月';
+    sun.getFullYear() + '年' + String(sun.getMonth() + 1).padStart(2, '0') + '月';
 
   // Match task reports to days
   var prevDayData = dayData;
   var tempData = makeFreshDayData();
-  for (var i = 0; i < 5; i++) {
-    var d = new Date(mon); d.setDate(mon.getDate() + i);
+  for (var i = 0; i < 7; i++) {
+    var d = new Date(sun); d.setDate(sun.getDate() + i);
     var dStr = isoDate(d);
     var match = myTaskReports.find(function (r) { return r.report_date === dStr; });
     if (match) {
@@ -277,7 +297,7 @@ function renderWeek() {
     }
   }
   // Preserve optimistic state
-  for (var k = 0; k < 5; k++) {
+  for (var k = 0; k < 7; k++) {
     if (prevDayData[k] && prevDayData[k].savedStatus && !tempData[k].savedStatus) {
       tempData[k] = prevDayData[k];
     } else if (prevDayData[k] && prevDayData[k].savedStatus &&
@@ -290,8 +310,8 @@ function renderWeek() {
 
   var container = document.getElementById('dayCards');
   container.innerHTML = '';
-  for (var j = 0; j < 5; j++) {
-    var dd = new Date(mon); dd.setDate(mon.getDate() + j);
+  for (var j = 0; j < 7; j++) {
+    var dd = new Date(sun); dd.setDate(sun.getDate() + j);
     container.appendChild(makeDayCard(dd, DAY_SHORTS[j], j));
   }
 }
@@ -302,7 +322,7 @@ function statusBadgeHtml(status) {
     none:              { label: '未作成', cls: 'bg-slate-100 text-slate-700' },
     draft:             { label: '作製中', cls: 'bg-blue-100 text-blue-700' },
     submitted:         { label: '申請中', cls: 'bg-orange-100 text-orange-700' },
-    reviewer_approved: { label: '確認中', cls: 'bg-yellow-100 text-yellow-700' },
+    reviewed:          { label: '照査済', cls: 'bg-yellow-100 text-yellow-700' },
     approved:          { label: '承認済', cls: 'bg-green-100 text-green-700' },
     rejected:          { label: '差戻し',   cls: 'bg-red-100 text-red-700' },
   };
@@ -311,7 +331,7 @@ function statusBadgeHtml(status) {
     s.cls + '">' + s.label + '</span>';
 }
 function _statusRank(s) {
-  var ranks = { none: 0, draft: 1, submitted: 2, reviewer_approved: 3, approved: 4, rejected: 0 };
+  var ranks = { none: 0, draft: 1, submitted: 2, reviewed: 3, approved: 4, rejected: 0 };
   return ranks[s] || 0;
 }
 
@@ -517,8 +537,8 @@ function saveTaskDay(idx) {
   dayData[idx].savedStatus     = 'draft';
 
   var offset = parseInt(weekSel.value) || 0;
-  var mon    = getMondayOfWeek(offset);
-  var date   = new Date(mon); date.setDate(mon.getDate() + idx);
+  var sun    = getSundayOfWeek(offset);
+  var date   = new Date(sun); date.setDate(sun.getDate() + idx);
 
   var payload = {
     date:            isoDate(date),
@@ -569,8 +589,8 @@ function submitTaskDay(idx) {
   var np = document.getElementById('nextDayPlan_' + idx);
 
   var offset = parseInt(weekSel.value) || 0;
-  var mon    = getMondayOfWeek(offset);
-  var date   = new Date(mon); date.setDate(mon.getDate() + idx);
+  var sun    = getSundayOfWeek(offset);
+  var date   = new Date(sun); date.setDate(sun.getDate() + idx);
 
   // If not yet saved, save as draft first then submit
   if (!dayData[idx].savedStatus || dayData[idx].savedStatus === 'none') {

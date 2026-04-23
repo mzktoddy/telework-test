@@ -1,0 +1,74 @@
+name: "Validate GAS files"
+
+on:
+  push:
+    paths:
+      - 'gas/**'
+  pull_request:
+    paths:
+      - 'gas/**'
+  workflow_dispatch: {}
+
+jobs:
+  validate:
+    name: Lint GAS files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install linters
+        run: |
+          npm init -y
+          npm install --no-audit --no-fund eslint@8 htmlhint@1
+
+      - name: Write ESLint config
+        run: |
+          cat > .eslintrc.json <<'EOF'
+          {
+            "env": {
+              "browser": true,
+              "es2020": true
+            },
+            "parserOptions": {
+              "ecmaVersion": 2018,
+              "sourceType": "script"
+            },
+            "rules": {
+              "no-unused-vars": "warn",
+              "no-undef": "off"
+            }
+          }
+          EOF
+
+      - name: Write HTMLHint config
+        run: |
+          cat > .htmlhintrc <<'EOF'
+          {
+            "attr-lowercase": true,
+            "attr-value-double-quotes": true,
+            "doctype-first": false,
+            "tagname-lowercase": true
+          }
+          EOF
+
+      - name: Lint .gs files with ESLint (report)
+        run: |
+          echo "Running ESLint on .gs files..."
+          npx eslint "gas/**/*.gs" --ext .gs || true
+
+      - name: Lint HTML files with HTMLHint (report)
+        run: |
+          echo "Running HTMLHint on .html files..."
+          npx htmlhint "gas/**/*.html" || true
+
+      - name: Fail if linters reported problems
+        run: |
+          npx eslint "gas/**/*.gs" --ext .gs
+          npx htmlhint "gas/**/*.html"

@@ -103,9 +103,8 @@ function loginUser(email, password) {
 }
 
 // ── Shared: write cache and build redirect response ─────────────
-//  Includes the explicit ?page= so doGet can route directly
-//  without relying on _renderDefault. The cache is still required
-//  for getCurrentUser() to confirm the user is authenticated.
+//  Redirects all users to dashboard after login.
+//  The cache is required for getCurrentUser() to confirm authentication.
 function _buildSession(user) {
   var info = {
     id:            user.id,
@@ -115,11 +114,9 @@ function _buildSession(user) {
     department_id: user.department_id,
   };
   CacheService.getUserCache().put('gasUser', JSON.stringify(info), 1800);
-  // getDefaultPage() is defined in Code.gs and shared globally.
-  var page = getDefaultPage(user.role); // 'reports' | 'approve' | 'employees'
   return {
     success:     true,
-    redirectUrl: ScriptApp.getService().getUrl() + '?page=' + page,
+    redirectUrl: ScriptApp.getService().getUrl() + '?page=dashboard',
   };
 }
 

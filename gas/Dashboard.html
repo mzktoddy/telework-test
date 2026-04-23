@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>在宅勤務報告システム</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Noto Sans JP', sans-serif; }
+    body { font-size: 16px; line-height: 1.8; }
+  </style>
+</head>
+<body class="bg-slate-50 h-screen flex overflow-hidden">
+
+<!-- Loading overlay -->
+<div id="pageLoader" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center">
+  <div class="flex flex-col items-center gap-3">
+    <div class="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+    <p class="text-white text-sm font-medium">読み込み中...</p>
+  </div>
+</div>
+
+<!-- GAS template vars -->
+<div id="gasVars" data-user='<?!= user ?>' data-url="<?= scriptUrl ?>" style="display:none"></div>
+
+<!-- ═══════════════════════════ SIDEBAR ═══════════════════════════ -->
+<aside class="flex flex-col h-screen w-64 bg-slate-900 text-white overflow-y-auto flex-shrink-0">
+  <div class="p-6 border-b border-slate-700">
+    <div class="flex items-center justify-center gap-3">
+      <div class="bg-blue-100 rounded-md text-sm font-bold">
+        <img src="" id="logoImg" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 brightness-300 h-auto hue-rotate-20" />
+      </div>
+      <div>
+        <p class="text-sm font-semibold">マミヤ</p>
+        <p class="text-xs text-slate-400">ITソリューションズ</p>
+      </div>
+    </div>
+  </div>
+  <nav class="flex-1 px-3 py-6 space-y-1" id="sidebarNav"></nav>
+  <div class="px-3 pb-6 border-t border-slate-700 pt-4 space-y-1">
+    <div class="px-4 py-2">
+      <p class="text-sm font-medium text-white" id="sidebarName"></p>
+      <p class="text-xs text-slate-400" id="sidebarEmail"></p>
+    </div>
+    <button onclick="logout()"
+      class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium
+             text-rose-400 hover:bg-slate-800 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
+      </svg>
+      ログアウト
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════ MAIN ══════════════════════════════ -->
+<main class="flex-1 overflow-y-auto p-8">
+
+  <!-- Header -->
+  <div class="mb-8 flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-bold text-slate-900 mb-2" id="dashboardTitle">ダッシュボード</h1>
+      <p class="text-slate-600" id="weekRangeLabel">週次サマリーを読み込み中...</p>
+    </div>
+  </div>
+
+  <!-- Row 1: Telework Conditions + Tokyo Weather -->
+  <div class="grid grid-cols-5 gap-6 mb-6">
+
+    <!-- Telework Conditions (3 cols) -->
+    <div class="col-span-3 bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+      <div class="flex items-center justify-between mb-5">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 bg-indigo-50 rounded-xl flex items-center justify-center">
+            <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+            </svg>
+          </div>
+          <h2 class="text-base font-semibold text-slate-900">テレワーク状況</h2>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-3 text-xs text-slate-600">
+            <span class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block"></span>
+              テレワーク（承認済）
+            </span>
+          </div>
+          <span class="text-xs text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full font-medium">今週</span>
+        </div>
+      </div>
+
+      <!-- Chart canvas -->
+      <div style="position:relative; height:220px;">
+        <canvas id="teleworkChart"></canvas>
+      </div>
+
+      <!-- Per-day count chips -->
+      <div class="flex mt-4" id="teleworkCounts"></div>
+    </div>
+
+    <!-- Tokyo Weekly Weather (2 cols) -->
+    <div class="col-span-2 bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+      <div class="flex items-center gap-3 mb-5">
+        <div class="w-9 h-9 bg-amber-50 rounded-xl flex items-center justify-center">
+          <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+        </div>
+        <h2 class="text-base font-semibold text-slate-900">東京 7日間天気予報</h2>
+      </div>
+      <div id="weatherList" class="space-y-1">
+        <div class="text-center py-8 text-slate-400 text-sm">天気情報を取得中...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: Daily Reports Submission -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-9 h-9 bg-emerald-50 rounded-xl flex items-center justify-center">
+        <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <h2 class="text-base font-semibold text-slate-900">日報提出状況</h2>
+    </div>
+    <div class="grid grid-cols-5 gap-6" id="reportStatus">
+      <div class="col-span-5 text-center py-6 text-slate-400 text-sm">読み込み中...</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ════════════════════════════ SCRIPTS ════════════════════════════ -->
+<script>
+var _gasEl     = document.getElementById('gasVars');
+var APP_USER   = JSON.parse(_gasEl.getAttribute('data-user') || 'null');
+var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
+
+var DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+
+// Set dashboard title based on user role
+if (APP_USER) {
+  document.getElementById('dashboardTitle').textContent = 
+    APP_USER.role === 'admin' ? '管理ダッシュボード' : '部門ダッシュボード';
+}
+
+// ── Sidebar ───────────────────────────────────────────────────
+(function buildSidebar() {
+  if (!APP_USER) return;
+  document.getElementById('sidebarName').textContent  = APP_USER.name;
+  document.getElementById('sidebarEmail').textContent = APP_USER.email;
+   var items = [
+    {
+      label: 'ダッシュボード', page: 'dashboard', active: true, color: 'text-white',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>',
+    },
+    {
+      label: '在宅勤務許可申請',
+      page:  'reports',
+      color: 'text-emerald-400',
+      icon:  '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    },
+    {
+      label: '日報報告', page: 'task_report', color: 'text-orange-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/>',
+    },
+    {
+      label: 'チームカレンダー', page: 'calendar', color: 'text-violet-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>',
+    }
+  ];
+  
+   if (APP_USER.role !== 'employee') {
+    items.push({
+      label: '申請承認', page: 'approve', color: 'text-emerald-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    });
+  }
+
+  if (APP_USER.role === 'admin') {
+
+    items.push({
+      label: '社員マスタ管理', page: 'employees', color: 'text-pink-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>',
+    });
+    items.push({
+      label: '申請履歴', page: 'admin_history', color: 'text-red-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>',
+    });
+  }
+  var nav = document.getElementById('sidebarNav');
+  items.forEach(function(item) {
+    var a = document.createElement('a');
+    a.href = item.active ? '#' : SCRIPT_URL + '?page=' + item.page;
+    a.className = [
+      'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
+      item.active
+        ? 'bg-blue-600 text-white'
+        : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+    ].join(' ');
+    a.innerHTML =
+      '<svg class="w-4 h-4 flex-shrink-0 ' + item.color + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+      item.icon + '</svg>' + item.label;
+    if (!item.active) {
+      a.addEventListener('click', function(e) {
+        e.preventDefault();
+        document.getElementById('pageLoader').classList.remove('hidden');
+        window.top.location.href = SCRIPT_URL + '?page=' + item.page;
+      });
+    }
+    nav.appendChild(a);
+  });
+})();
+
+// ── Logo ──────────────────────────────────────────────────────
+google.script.run
+  .withSuccessHandler(function(b) { if (b) document.getElementById('logoImg').src = b; })
+  .withFailureHandler(function() {})
+  .getImageAsBase64('1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D');
+
+// ── Logout ────────────────────────────────────────────────────
+function logout() {
+  document.getElementById('pageLoader').classList.remove('hidden');
+  google.script.run
+    .withSuccessHandler(function() { window.top.location.href = SCRIPT_URL + '?page=login'; })
+    .withFailureHandler(function() { window.top.location.href = SCRIPT_URL + '?page=login'; })
+    .logoutUser();
+}
+
+// ── Week date helpers ─────────────────────────────────────────
+function getThisWeekDates() {
+  var today = new Date();
+  var dow   = today.getDay();
+  var offset = dow === 0 ? -6 : 1 - dow;
+  var monday = new Date(today);
+  monday.setDate(today.getDate() + offset);
+  monday.setHours(0, 0, 0, 0);
+  var dates = [];
+  for (var i = 0; i < 5; i++) {
+    var d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    dates.push(
+      d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0')
+    );
+  }
+  return dates;
+}
+
+var weekDates = getThisWeekDates();
+
+// Set header week range (Sunday–Saturday)
+(function() {
+  var today  = new Date();
+  var sunday = new Date(today);
+  sunday.setDate(today.getDate() - today.getDay());
+  var saturday = new Date(sunday);
+  saturday.setDate(sunday.getDate() + 6);
+  function fmt(d) {
+    return d.getFullYear() + '/' +
+      String(d.getMonth()+1).padStart(2,'0') + '/' +
+      String(d.getDate()).padStart(2,'0');
+  }
+  document.getElementById('weekRangeLabel').textContent =
+    fmt(sunday) + ' ～ ' + fmt(saturday) + ' の週次サマリー';
+})();
+
+// ── Load backend data ────────────────────────────────────────
+// Admin sees all employees, non-admin sees only their department
+var dashboardFunction = (APP_USER && APP_USER.role === 'admin') 
+  ? 'getAdminDashboardData' 
+  : 'getDepartmentDashboardData';
+
+google.script.run
+  .withSuccessHandler(function(data) {
+    if (!data || data.error) {
+      console.warn('Dashboard data error:', data && data.error);
+      renderTeleworkChart({ teleworkData: DAY_LABELS.map(function() { return { telework: 0, office: 0 }; }) });
+      renderReportStatus({ reportData: DAY_LABELS.map(function() { return { submitted: 0, missing: 0 }; }) });
+      return;
+    }
+    renderTeleworkChart(data);
+    renderReportStatus(data);
+  })
+  .withFailureHandler(function(e) {
+    console.error('Dashboard data load failed:', e);
+  })
+  [dashboardFunction]();
+
+// Load weather from server via GAS (UrlFetchApp, Sun–Sat)
+google.script.run
+  .withSuccessHandler(renderWeather)
+  .withFailureHandler(function() {
+    document.getElementById('weatherList').innerHTML =
+      '<p class="text-xs text-slate-400 text-center py-8">天気情報を取得できませんでした</p>';
+  })
+  .getTokyoWeather();
+
+// ── Telework bar chart (approved telework only) ─────────────
+var chartInstance = null;
+
+// Inline plugin: draw count labels inside (or above) each bar
+var countLabelPlugin = {
+  id: 'countLabel',
+  afterDatasetsDraw: function(chart) {
+    var ctx = chart.ctx;
+    chart.data.datasets.forEach(function(dataset, di) {
+      var meta = chart.getDatasetMeta(di);
+      meta.data.forEach(function(bar, idx) {
+        var value = dataset.data[idx];
+        if (value == null || value <= 0) return;
+        var barHeight = Math.abs(bar.base - bar.y);
+        ctx.save();
+        ctx.font = 'bold 13px Noto Sans JP, sans-serif';
+        ctx.textAlign = 'center';
+        if (barHeight >= 22) {
+          // Inside bar — white text
+          ctx.fillStyle = '#ffffff';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(value + '名', bar.x, bar.y + barHeight / 2);
+        } else {
+          // Above bar — indigo text
+          ctx.fillStyle = '#4f46e5';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(value + '名', bar.x, bar.y - 3);
+        }
+        ctx.restore();
+      });
+    });
+  },
+};
+
+function renderTeleworkChart(data) {
+  var telework = data.teleworkData.map(function(d) { return d.telework; });
+
+  var ctx = document.getElementById('teleworkChart').getContext('2d');
+  if (chartInstance) chartInstance.destroy();
+
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    plugins: [countLabelPlugin],
+    data: {
+      labels: DAY_LABELS,
+      datasets: [
+        {
+          label: 'テレワーク（承認済）',
+          data: telework,
+          backgroundColor: '#6366f1',
+          hoverBackgroundColor: '#4f46e5',
+          borderRadius: 8,
+          borderSkipped: false,
+          barPercentage: 0.6,
+          categoryPercentage: 0.7,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { top: 24 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return ctx.dataset.label + ': ' + ctx.raw + '名';
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid:   { display: false },
+          border: { display: false },
+          ticks:  { color: '#64748b', font: { size: 12, weight: '500' } },
+        },
+        y: {
+          beginAtZero: true,
+          ticks:  { stepSize: 1, color: '#94a3b8', font: { size: 11 } },
+          grid:   { color: '#f1f5f9' },
+          border: { display: false },
+        },
+      },
+    },
+  });
+
+  // Count chips under chart
+  var countsEl = document.getElementById('teleworkCounts');
+  countsEl.innerHTML = '';
+  data.teleworkData.forEach(function(d) {
+    var chip = document.createElement('div');
+    chip.style.flex = '1';
+    chip.className  = 'text-center';
+    chip.innerHTML =
+      '<span class="inline-flex items-center gap-1 text-xs">' +
+        '<span class="w-2 h-2 rounded-full bg-indigo-500 inline-block"></span>' +
+        '<span class="font-bold text-indigo-700">' + d.telework + '名</span>' +
+      '</span>';
+    countsEl.appendChild(chip);
+  });
+}
+
+// ── Render weather from GAS data (today + 7 days) ───────────
+var JP_DAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
+function weatherCodeToText(code) {
+  if (code === null || code === undefined) return '—';
+  if (code === 0) return '晴れ';
+  if (code <= 2) return '晴れ時々曇り';
+  if (code === 3) return '曇り';
+  if (code <= 48) return '霧';
+  if (code <= 67) return '雨';
+  if (code <= 77) return '雪';
+  if (code <= 82) return 'にわか雨';
+  return '雷雨';
+}
+
+function renderWeather(days) {
+  var weatherList = document.getElementById('weatherList');
+  if (!days || days.error || !Array.isArray(days)) {
+    weatherList.innerHTML =
+      '<p class="text-xs text-slate-400 text-center py-8">天気情報を取得できませんでした</p>';
+    return;
+  }
+  weatherList.innerHTML = '';
+  days.forEach(function(d) {
+    var parts = (d.date || '').split('-');
+    var dt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    var dayLabel = JP_DAYS[dt.getDay()];
+    var weatherText = weatherCodeToText(d.code);
+    var row = document.createElement('div');
+    row.className = 'flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0';
+    row.innerHTML =
+      '<span class="text-sm font-semibold text-slate-700 w-8">' + dayLabel + '</span>' +
+      '<span class="flex-shrink-0">' +
+        (d.code !== null ? weatherIconSVG(d.code) : '<span class="text-slate-300 text-xl">—</span>') +
+      '</span>' +
+      '<span class="text-xs text-slate-600 flex-1 text-center">' + weatherText + '</span>' +
+      '<span class="text-sm font-bold text-slate-800 w-10 text-right">' +
+        (d.temp !== null ? d.temp + '°' : '—') +
+      '</span>';
+    weatherList.appendChild(row);
+  });
+}
+
+function weatherIconSVG(code) {
+  // WMO weather interpretation codes → SVG icon
+  if (code === 0) {
+    // Clear sky — sun
+    return '<svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<circle cx="12" cy="12" r="4.5" fill="#FBBF24"/>' +
+      '<path d="M12 3v2M12 19v2M3 12h2M19 12h2' +
+      'M6.22 6.22l1.42 1.42M16.36 16.36l1.42 1.42' +
+      'M6.22 17.78l1.42-1.42M16.36 7.64l1.42-1.42" stroke="#FBBF24" stroke-width="2" stroke-linecap="round"/>' +
+      '</svg>';
+  }
+  if (code <= 2) {
+    // Mainly clear / partly cloudy — sun + small cloud
+    return '<svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<circle cx="10" cy="9" r="3.5" fill="#FBBF24"/>' +
+      '<path d="M10 3.5v2M10 13.5v1.5M4.5 9h2M14 9h1.5M6.4 5.4l1.4 1.4M12.2 11.2l1.4 1.4M6.4 12.6l1.4-1.4" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round"/>' +
+      '<path d="M19.5 15.5a3 3 0 00-3-3A4.5 4.5 0 005 15.5H19.5z" fill="#93C5FD"/>' +
+      '</svg>';
+  }
+  if (code === 3) {
+    // Overcast — cloud
+    return '<svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M20 17.5a3.5 3.5 0 000-7 5.5 5.5 0 00-10.5-2.3A4 4 0 104 17.5H20z" fill="#94A3B8"/>' +
+      '</svg>';
+  }
+  if (code <= 48) {
+    // Fog
+    return '<svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M20 11.5a3.5 3.5 0 000-7 5.5 5.5 0 00-10.5-2.3A4 4 0 104 11.5H20z" fill="#CBD5E1"/>' +
+      '<path d="M4 15h16M6 18h12" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"/>' +
+      '</svg>';
+  }
+  if (code <= 67) {
+    // Drizzle / Rain
+    return '<svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M20 14.5a3.5 3.5 0 000-7 5.5 5.5 0 00-10.5-2.3A4 4 0 104 14.5H20z" fill="#93C5FD"/>' +
+      '<path d="M8 18v2M12 17v2M16 18v2" stroke="#3B82F6" stroke-width="1.5" stroke-linecap="round"/>' +
+      '</svg>';
+  }
+  if (code <= 77) {
+    // Snow
+    return '<svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M20 14.5a3.5 3.5 0 000-7 5.5 5.5 0 00-10.5-2.3A4 4 0 104 14.5H20z" fill="#BAE6FD"/>' +
+      '<circle cx="8"  cy="19" r="1.2" fill="#7DD3FC"/>' +
+      '<circle cx="12" cy="20" r="1.2" fill="#7DD3FC"/>' +
+      '<circle cx="16" cy="19" r="1.2" fill="#7DD3FC"/>' +
+      '</svg>';
+  }
+  if (code <= 82) {
+    // Rain showers
+    return '<svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M20 14.5a3.5 3.5 0 000-7 5.5 5.5 0 00-10.5-2.3A4 4 0 104 14.5H20z" fill="#93C5FD"/>' +
+      '<path d="M7 18.5l1 2M11 17.5l1 2M15 18.5l1 2" stroke="#3B82F6" stroke-width="1.5" stroke-linecap="round"/>' +
+      '</svg>';
+  }
+  // Thunderstorm (code 95+)
+  return '<svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M20 14.5a3.5 3.5 0 000-7 5.5 5.5 0 00-10.5-2.3A4 4 0 104 14.5H20z" fill="#94A3B8"/>' +
+    '<path d="M13 16l-3 5h4l-3 5" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>';
+}
+
+// ── Daily report submission progress bars ─────────────────────
+function renderReportStatus(data) {
+  var el = document.getElementById('reportStatus');
+  el.innerHTML = '';
+  data.reportData.forEach(function(d, i) {
+    var total = d.submitted + d.missing;
+    var pct   = total > 0 ? Math.min(100, Math.round((d.submitted / total) * 100)) : 0;
+
+    var col = document.createElement('div');
+    col.innerHTML =
+      '<p class="text-sm font-semibold text-slate-900 mb-3">' + DAY_LABELS[i] + '</p>' +
+      '<div class="w-full bg-slate-100 rounded-full h-2 mb-3">' +
+        '<div class="bg-blue-500 h-2 rounded-full transition-all duration-700" style="width:' + pct + '%"></div>' +
+      '</div>' +
+      '<p class="text-xs">' +
+        '<span class="font-bold text-slate-800">' + d.submitted + '</span>' +
+        '<span class="text-slate-500 ml-1">提出済</span>' +
+      '</p>' +
+      (d.missing > 0
+        ? '<p class="text-xs text-slate-400">' + d.missing + ' 未提出</p>'
+        : (d.submitted > 0
+          ? '<p class="text-xs text-emerald-600 font-medium">全員提出済 ✓</p>'
+          : '<p class="text-xs text-slate-400">未提出</p>'));
+    el.appendChild(col);
+  });
+}
+</script>
+</body>
+</html>

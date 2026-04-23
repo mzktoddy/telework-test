@@ -8,6 +8,8 @@
 var SPREADSHEET_ID = '1yJMqIrqETSMCObKWyMLcUzV7cjSTEDAKDajVZfQOdSY'; // ← Paste your Spreadsheet ID here
 var REDMINE_URL = 'https://pm.fs-revolution.info';
 var API_KEY = '5a50bf5242d0d4f2d9bcfa174b59fbffb9944ab2';
+const MATTERMOST_WEBHOOK_URL = "https://ch.fs-revolution.info/hooks/m14yxj45r3dzxr6hd13bnx4w5a";
+
 // ── Entry point ──────────────────────────────────────────────
 //
 //  Auth flow:
@@ -34,58 +36,48 @@ function doGet(e) {
     return renderPage('Login', null);
   }
 
-  // No page param → render the user's role-default page
+  // No page param → default to dashboard
   if (!page) {
-    return _renderDefault(user);
+    return renderPage('Dashboard', user);
   }
 
-  // Role-based access control
-  if (page === 'reports') {
-    return renderPage('Reports', user);
-  }
-
-  if (page === 'task_report') {
-    return renderPage('TaskReport', user);
-  }
-
-  if (page === 'approve') {
-    if (user.role === 'reviewer' || user.role === 'manager' || user.role === 'admin') {
-      return renderPage('Approve', user);
-    }
-    return _renderDefault(user); // not authorised → their own default
-  }
-
-  if (page === 'employees') {
-    if (user.role === 'admin') {
-      return renderPage('Employees', user);
-    }
-    return _renderDefault(user); // not authorised → their own default
-  }
-
-  if (page === 'admin_history') {
-    if (user.role === 'admin') {
-      return renderPage('AdminHistory', user);
-    }
-    return _renderDefault(user); // not authorised → their own default
-  }
-
-  if (page === 'calendar') {
-    return renderPage('Calendar', user);
-  }
-
-  // Unknown page → role default
-  return _renderDefault(user);
+  // Route to appropriate page with role-based access control
+  return _routePage(page, user);
 }
 
-// ── Render the correct template for a user's role ─────────────
-function _renderDefault(user) {
-  var p = getDefaultPage(user.role); // returns 'reports' | 'approve' | 'employees'
-  if (p === 'approve')   return renderPage('Approve',   user);
-  if (p === 'employees') return renderPage('Employees', user);
-  return renderPage('Reports', user);
+// ── Route to page with role-based access control ─────────────
+function _routePage(page, user) {
+  // Define page access rules: page -> allowed roles (empty array = all roles)
+  var pageAccess = {
+    'dashboard':     [],  // All roles
+    'reports':       [],  // All roles
+    'task_report':   [],  // All roles
+    'calendar':      [],  // All roles
+    'approve':       ['reviewer', 'manager', 'admin'],
+    'employees':     ['admin'],
+    'admin_history': ['admin']
+  };
+
+  // Check if page exists in routing
+  if (!pageAccess.hasOwnProperty(page)) {
+    return renderPage('Dashboard', user);  // Unknown page → dashboard
+  }
+
+  // Check role-based access
+  var allowedRoles = pageAccess[page];
+  var hasAccess = allowedRoles.length === 0 || allowedRoles.indexOf(user.role) >= 0;
+
+  if (!hasAccess) {
+    return renderPage('Dashboard', user);  // No access → dashboard
+  }
+
+  // Capitalize first letter for template name
+  var templateName = page.split('_').map(function(word) {
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }).join('');
+
+  return renderPage(templateName, user);
 }
-
-
 
 // ── Template renderer ────────────────────────────────────────
 function renderPage(templateName, user) {
@@ -96,7 +88,7 @@ function renderPage(templateName, user) {
   tmpl.scriptUrl = ScriptApp.getService().getUrl();
   return tmpl
     .evaluate()
-    .setTitle('在宅勤務・プロ')
+    .setTitle('在宅勤務報告システム')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
@@ -104,13 +96,6 @@ function renderPage(templateName, user) {
 // ── Template include helper ──────────────────────────────────
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
-}
-
-// ── Role → default page mapping (also used by Auth.gs) ──────
-function getDefaultPage(role) {
-  if (role === 'reviewer' || role === 'manager') return 'approve';
-  if (role === 'admin') return 'employees';
-  return 'reports';
 }
 
 // ── Get image from Google Drive and convert to base64 ────────
@@ -348,6 +333,136 @@ function main() {
 }
 
 
+
+/**
+ * Send a telework report approval notification to Mattermost
+ * @param {Object} notificationData - Notification details
+ * @param {string} notificationData.reportType - 'telework' or 'task'
+ * @param {string} notificationData.reportDate - Report date (YYYY-MM-DD)
+ * @param {string} notificationData.weekTitle - Week title (e.g., '第14週') for telework reports
+ * @param {string} notificationData.employeeName - Employee name
+ * @param {string} notificationData.employeeEmail - Employee email (for mentioning)
+ * @param {string} notificationData.approverName - Approver's name
+ * @param {string} notificationData.decision - 'approved' or 'rejected'
+ * @param {string} notificationData.reportUrl - URL to view the report
+ * @param {string} channel - Mattermost channel (optional)
+ */
+function sendMattermostMessage(notificationData, channel) {
+  try {
+    var date = new Date(notificationData.reportDate);
+    var year = Utilities.formatDate(date, "Asia/Tokyo", "yyyy");
+    
+    // Extract username from email for mention (e.g., "y.toki@example.com" -> "y.toki")
+    var mattermostUsername = notificationData.employeeEmail ? 
+                            notificationData.employeeEmail.split('@')[0].replace('.', '-') : 
+                            'user';
+    var mattermostUsername　= 'myintzuko';
+    
+    // Determine status message
+    var statusText = notificationData.decision === 'approved' ? '承認' : 
+                     notificationData.decision === 'reviewed' ? '照査' : '却下';
+    
+    // System URL (you may need to update this to your actual system URL)
+    var systemUrl = notificationData.reportUrl || ScriptApp.getService().getUrl();
+    
+    // Format message header based on report type
+    var messageHeader;
+    if (notificationData.reportType === 'telework') {
+      // Telework report: "2026年 第14週 在宅勤務許可申請書についてのお知らせ"
+      messageHeader = year + '年 ' + notificationData.weekTitle + ' 在宅勤務許可申請書についてのお知らせ';
+    } else {
+      // Task report: "2026/03/27（金） 在宅勤務報告書についてのお知らせ"
+      var weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+      var formattedDate = Utilities.formatDate(date, "Asia/Tokyo", "yyyy/MM/dd") + 
+                         '（' + weekdays[date.getDay()] + '）';
+      messageHeader = formattedDate + ' 在宅勤務報告書についてのお知らせ';
+    }
+    
+    // Format message with proper structure
+    var message =  messageHeader + '\n\n';
+    message += '@' + mattermostUsername + '\n';
+    message += '**' + notificationData.approverName + '** により **' + statusText + '** されました。\n';
+    message += '[内容をご確認ください](' + systemUrl + ')';
+    
+    var payload = {
+      text: message,
+      // channel: channel || 'daily-report',
+      username: '日報管理システム                              ',
+      icon_emoji: ':mop:',
+    };
+
+    var options = {
+      method: 'POST',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+
+    var response = UrlFetchApp.fetch(MATTERMOST_WEBHOOK_URL, options);
+    var statusCode = response.getResponseCode();
+
+    if (statusCode === 200) {
+      Logger.log('✅ Mattermost notification sent successfully');
+      return { success: true };
+    } else {
+      Logger.log('❌ Mattermost notification failed: ' + statusCode + ' | ' + response.getContentText());
+      return { success: false, error: 'HTTPエラー: ' + statusCode };
+    }
+  } catch (error) {
+    Logger.log('❌ Error sending Mattermost notification: ' + error.toString());
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * Test function to verify Mattermost notifications are working
+ * Run this from the Google Apps Script editor to test the notification
+ */
+function testMattermostNotification() {
+  // Test telework report notification
+  Logger.log('Testing telework report notification...');
+  var teleworkData = {
+    reportType: 'telework',
+    reportDate: '2026-03-27',
+    weekTitle: '第14週',
+    employeeName: 'ズーコ',
+    employeeEmail: 'ite001702@athuman.com',
+    approverName: '海田',
+    decision: 'approved',
+    reportUrl: ScriptApp.getService().getUrl() + '?page=reports',
+  };
+  
+  var result1 = sendMattermostMessage(teleworkData, 'daily-report');
+  
+  if (result1.success) {
+    Logger.log('✅ Telework report notification sent successfully!');
+  } else {
+    Logger.log('❌ Telework report notification failed: ' + result1.error);
+  }
+  
+  // Test task report notification
+  Logger.log('Testing task report notification...');
+  var taskData = {
+    reportType: 'task',
+    reportDate: '2026-03-27',
+    employeeName: 'ズーコ',
+    employeeEmail: 'ite001702@athuman.com',
+    approverName: '海田',
+    decision: 'approved',
+    reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
+  };
+  
+  var result2 = sendMattermostMessage(taskData, 'daily-report');
+  
+  if (result2.success) {
+    Logger.log('✅ Task report notification sent successfully!');
+  } else {
+    Logger.log('❌ Task report notification failed: ' + result2.error);
+  }
+  
+  return { telework: result1, task: result2 };
+}
+
 function getUserList() {
   const url = `${REDMINE_URL}/users.json?limit=100`;
   
@@ -363,4 +478,52 @@ function getUserList() {
   data.users.forEach(user => {
     Logger.log(`ID: ${user.id} | Login: ${user.login} | Name: ${user.firstname} ${user.lastname} | mail: ${user.mail}`);
   });
+}
+
+function getChannelById() {
+  channelId = '79s78jijg3yjxcdsxt9q33shha'
+  const url = `${MATTERMOST_WEBHOOK_URL}/api/v4/channels/${channelId}`;
+
+  const options = {
+    method: "GET",
+    muteHttpExceptions: true
+  };
+
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const data = JSON.parse(response.getContentText());
+    return JSON.parse(response.getContentText());
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── Tokyo weather forecast via Open-Meteo ────────────────────
+// Returns 7 days starting from today (Japan time).
+// Called from Dashboard.html via google.script.run.
+function getTokyoWeather() {
+  var url =
+    'https://api.open-meteo.com/v1/forecast' +
+    '?latitude=35.6762&longitude=139.6503' +
+    '&daily=weather_code,temperature_2m_max' +
+    '&timezone=Asia%2FTokyo&forecast_days=7';
+
+  try {
+    var res  = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    var json = JSON.parse(res.getContentText());
+
+    // Open-Meteo returns daily arrays starting from today — use directly
+    var days = [];
+    for (var i = 0; i < 7; i++) {
+      days.push({
+        date: json.daily.time[i] || '',
+        code: json.daily.weather_code[i] !== undefined ? json.daily.weather_code[i] : null,
+        temp: json.daily.temperature_2m_max[i] !== undefined
+          ? Math.round(json.daily.temperature_2m_max[i]) : null,
+      });
+    }
+    return days;
+  } catch (e) {
+    return { error: e.toString() };
+  }
 }

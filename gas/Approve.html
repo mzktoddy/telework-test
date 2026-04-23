@@ -3,8 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>在宅勤務・プロ | 承認</title>
+  <title>在宅勤務報告システム</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      font-family: 'Noto Sans JP', sans-serif;
+    }
+    
+    body {
+      font-size: 16px;
+      line-height: 1.8;  
+    }
+  </style>
 </head>
 <body class="bg-slate-50 h-screen flex overflow-hidden">
 <!-- Loading overlay -->
@@ -75,7 +86,7 @@
                  focus:outline-none focus:ring-2 focus:ring-blue-300 rounded-sm bg-white">
           <option value="all" selected>全ステータス</option>
           <option value="submitted">申請中のみ</option>
-          <option value="reviewer_approved">確認済みのみ</option>
+          <option value="reviewed">照査済のみ</option>
         </select>
         <select id="deptFilter"
           class="h-9 px-4 w-52 text-slate-900 font-medium text-sm border border-slate-800
@@ -122,6 +133,10 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
   document.getElementById('sidebarEmail').textContent = APP_USER.email;
 
   var items = [
+    {
+      label: 'ダッシュボード', page: 'dashboard', color: 'text-blue-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>',
+    },
     {
       label: '在宅勤務許可申請',
       page:  'reports',
@@ -276,17 +291,52 @@ function renderList() {
 }
 
 var STATUS_MAP = {
-  submitted:         { label: '申請中',   cls: 'bg-orange-100 text-orange-700' },
-  reviewer_approved: { label: '確認済',   cls: 'bg-yellow-100 text-yellow-700' },
-  approved:          { label: '承認済',   cls: 'bg-green-100 text-green-700' },
-  rejected:          { label: '差戻し',     cls: 'bg-red-100 text-red-700' },
-  draft:             { label: '下書き',   cls: 'bg-slate-100 text-slate-600' },
-  none:              { label: '不明',     cls: 'bg-blue-100 text-blue-700' },
+  submitted:  { label: '申請中',   cls: 'bg-orange-100 text-orange-700' },
+  reviewed:   { label: '照査済',   cls: 'bg-yellow-100 text-yellow-700' },
+  approved:   { label: '承認済',   cls: 'bg-green-100 text-green-700' },
+  rejected:   { label: '差戻し',   cls: 'bg-red-100 text-red-700' },
+  draft:      { label: '下書き',   cls: 'bg-slate-100 text-slate-600' },
+  none:       { label: '不明',     cls: 'bg-blue-100 text-blue-700' },
 };
 
 function statusBadge(status) {
   var s = STATUS_MAP[status] || STATUS_MAP.none;
   return '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ' + s.cls + '">' + s.label + '</span>';
+}
+
+// Get approval button based on status and user role
+function getApprovalButton(report) {
+  var status = report.status;
+  var userRole = APP_USER.role;
+  
+  // For submitted status: show "照査" button
+  if (status === 'submitted') {
+    return '<button onclick="doReview(\'' + report.id + '\')" ' +
+      'class="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-sm font-medium transition-colors">' +
+      '照査 ✓' +
+    '</button>';
+  }
+  
+  // For reviewed status: only managers and admins can approve
+  if (status === 'reviewed') {
+    if (userRole === 'manager' || userRole === 'admin') {
+      return '<button onclick="doApprove(\'' + report.id + '\')" ' +
+        'class="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-sm font-medium transition-colors">' +
+        '承認 ✓' +
+      '</button>';
+    } else {
+      // Reviewers cannot approve, only review
+      return '<button disabled class="flex-1 h-10 bg-slate-300 text-slate-500 rounded-full text-sm font-medium cursor-not-allowed">' +
+        '承認待ち' +
+      '</button>';
+    }
+  }
+  
+  // Default: show approve button (for backward compatibility)
+  return '<button onclick="doApprove(\'' + report.id + '\')" ' +
+    'class="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-sm font-medium transition-colors">' +
+    '承認 ✓' +
+  '</button>';
 }
 
 function escapeHtml(str) {
@@ -470,10 +520,7 @@ function openTeleworkDetail(r) {
             'class="flex-1 h-10 border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">' +
             '差戻し' +
           '</button>' +
-          '<button onclick="doApprove(\'' + r.id + '\')" ' +
-            'class="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-sm font-medium transition-colors">' +
-            '承認 ✓' +
-          '</button>' +
+          getApprovalButton(r) +
         '</div>' +
         '<div id="actionMsg" class="hidden text-sm text-center p-2 rounded-md mt-3"></div>' +
       '</div>' +
@@ -562,13 +609,49 @@ function openTaskReportDetail(r) {
           'class="flex-1 h-10 border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">' +
           '差戻し' +
         '</button>' +
-        '<button onclick="doApprove(\'' + r.id + '\')" ' +
-          'class="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-sm font-medium transition-colors">' +
-          '承認 ✓' +
-        '</button>' +
+        getApprovalButton(r) +
       '</div>' +
       '<div id="actionMsg" class="hidden text-sm text-center p-2 rounded-md"></div>' +
     '</div>';
+}
+
+function doReview(reportId) {
+  var comment = (document.getElementById('approverComment') || {}).value || '';
+  var isTaskReport = selectedReport && selectedReport._type === 'task_report';
+  
+  if (isTaskReport) {
+    // Task report - single day review
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.error) { showActionMsg(r.error, false); return; }
+        showActionMsg('照査しました！', true);
+        reloadReports();
+      })
+      .withFailureHandler(function () { showActionMsg('エラーが発生しました', false); })
+      .reviewTaskReportAction(reportId, comment);
+  } else {
+    // Telework - review all days in the week
+    if (!selectedReport || !selectedReport.tasks || !selectedReport.tasks.length) {
+      showActionMsg('申請日が見つかりません', false);
+      return;
+    }
+    
+    showActionMsg('照査処理中...', true);
+    var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.error) {
+          showActionMsg('エラー: ' + r.error, false);
+          return;
+        }
+        showActionMsg('すべての日を照査しました！', true);
+        setTimeout(function() { reloadReports(); }, 1000);
+      })
+      .withFailureHandler(function () {
+        showActionMsg('エラーが発生しました', false);
+      })
+      .reviewWeekReport(dayIds, comment);
+  }
 }
 
 function doApprove(reportId) {
@@ -594,30 +677,20 @@ function doApprove(reportId) {
     
     showActionMsg('承認処理中...', true);
     var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
-    approveAllDays(dayIds, comment, 0);
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.error) {
+          showActionMsg('エラー: ' + r.error, false);
+          return;
+        }
+        showActionMsg('すべての日を承認しました！', true);
+        setTimeout(function() { reloadReports(); }, 1000);
+      })
+      .withFailureHandler(function () {
+        showActionMsg('エラーが発生しました', false);
+      })
+      .approveWeekReport(dayIds, comment);
   }
-}
-
-function approveAllDays(dayIds, comment, index) {
-  if (index >= dayIds.length) {
-    showActionMsg('すべての日を承認しました！', true);
-    setTimeout(function() { reloadReports(); }, 1000);
-    return;
-  }
-  
-  google.script.run
-    .withSuccessHandler(function (r) {
-      if (r && r.error) {
-        showActionMsg('エラー: ' + r.error, false);
-        return;
-      }
-      // Approve next day
-      approveAllDays(dayIds, comment, index + 1);
-    })
-    .withFailureHandler(function () {
-      showActionMsg('エラーが発生しました', false);
-    })
-    .approveReportAction(dayIds[index], comment);
 }
 
 function doReject(reportId) {
@@ -643,30 +716,20 @@ function doReject(reportId) {
     
     showActionMsg('差戻し処理中...', true);
     var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
-    rejectAllDays(dayIds, comment, 0);
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.error) {
+          showActionMsg('エラー: ' + r.error, false);
+          return;
+        }
+        showActionMsg('すべての日を差戻ししました', true);
+        setTimeout(function() { reloadReports(); }, 1000);
+      })
+      .withFailureHandler(function () {
+        showActionMsg('エラーが発生しました', false);
+      })
+      .rejectWeekReport(dayIds, comment);
   }
-}
-
-function rejectAllDays(dayIds, comment, index) {
-  if (index >= dayIds.length) {
-    showActionMsg('すべての日を差戻ししました', true);
-    setTimeout(function() { reloadReports(); }, 1000);
-    return;
-  }
-  
-  google.script.run
-    .withSuccessHandler(function (r) {
-      if (r && r.error) {
-        showActionMsg('エラー: ' + r.error, false);
-        return;
-      }
-      // Reject next day
-      rejectAllDays(dayIds, comment, index + 1);
-    })
-    .withFailureHandler(function () {
-      showActionMsg('エラーが発生しました', false);
-    })
-    .rejectReportAction(dayIds[index], comment);
 }
 
 function showActionMsg(msg, ok) {

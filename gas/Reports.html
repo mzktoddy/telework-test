@@ -3,8 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>在宅勤務・プロ | 申請</title>
+  <title>在宅勤務報告システム</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      font-family: 'Noto Sans JP', sans-serif;
+    }
+    
+    body {
+      font-size: 16px;
+      line-height: 1.8;  
+    }
+  </style>
 </head>
 <body class="bg-slate-50 h-screen flex overflow-hidden">
 <!-- Loading overlay -->
@@ -122,6 +133,10 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
 
   var items = [
     {
+      label: 'ダッシュボード', page: 'dashboard', color: 'text-blue-400',
+      icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>',
+    },
+    {
       label: '在宅勤務許可申請',
       page:  'reports',
       color: 'text-emerald-400',
@@ -194,20 +209,35 @@ google.script.run
   .getImageAsBase64(logoFileId);
 
 // ── Week helpers ──────────────────────────────────────────────
-function getISOWeek(d) {
-  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  var y = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d - y) / 86400000 + 1) / 7);
+function getWeekNumber(d) {
+  var startOfYear = new Date(d.getFullYear(), 0, 1);
+  
+  // Find the first Sunday of the year
+  var firstSunday = new Date(startOfYear);
+  var dayOfWeek = startOfYear.getDay();
+  if (dayOfWeek !== 0) {
+    firstSunday.setDate(startOfYear.getDate() + (7 - dayOfWeek));
+  }
+  
+  // If date is before first Sunday, it's week 1
+  if (d < firstSunday) {
+    return 1;
+  }
+  
+  // Calculate week number from first Sunday
+  var daysSinceFirstSunday = Math.floor((d - firstSunday) / (24 * 60 * 60 * 1000));
+  var weekNumber = Math.floor(daysSinceFirstSunday / 7) + 1;
+  
+  return weekNumber;
 }
 
-function getMondayOfWeek(offset) {
+function getSundayOfWeek(offset) {
   var today = new Date();
-  var day   = today.getDay() || 7;
-  var monday = new Date(today);
-  monday.setDate(today.getDate() - day + 1 + offset * 7);
-  monday.setHours(0, 0, 0, 0);
-  return monday;
+  var day = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  var sunday = new Date(today);
+  sunday.setDate(today.getDate() - day + offset * 7);
+  sunday.setHours(0, 0, 0, 0);
+  return sunday;
 }
 
 function fmtDate(d) {
@@ -224,15 +254,15 @@ function isoDate(d) {
 
 // ── Populate week selector ────────────────────────────────────
 var weekSel    = document.getElementById('weekSelect');
-var DAY_SHORTS = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+var DAY_SHORTS = ['日', '月', '火', '水', '木', '金', '土'];
 
 for (var w = 0; w < 4; w++) {
-  var mon = getMondayOfWeek(w);
-  var fri = new Date(mon); fri.setDate(mon.getDate() + 4);
+  var sun = getSundayOfWeek(w);
+  var sat = new Date(sun); sat.setDate(sun.getDate() + 6);
   var opt = document.createElement('option');
   opt.value = w;
-  opt.textContent = '第' + getISOWeek(mon) + '週　' +
-    fmtDate(mon) + '（月）～' + fmtDate(fri) + '（金）';
+  opt.textContent = '第' + getWeekNumber(sun) + '週　' +
+    fmtDate(sun) + '（' + DAY_SHORTS[0] + '）～' + fmtDate(sat) + '（' + DAY_SHORTS[6] + '）';
   weekSel.appendChild(opt);
 }
 
@@ -243,7 +273,7 @@ var dayData        = makeFreshDayData();
 var availableTasks = {}; // Store fetched Redmine tasks by day index
 
 function makeFreshDayData() {
-  return [0,1,2,3,4].map(function () {
+  return [0,1,2,3,4,5,6].map(function () {
     return { workType: '在宅勤務', notes: '', redmineTasks: [], edited: false, savedStatus: null };
   });
 }
@@ -280,21 +310,21 @@ weekSel.addEventListener('change', function () {
 // ── Render week ───────────────────────────────────────────────
 function renderWeek() {
   var offset = parseInt(weekSel.value) || 0;
-  var mon    = getMondayOfWeek(offset);
-  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
-  var weekNo = getISOWeek(mon);
+  var sun    = getSundayOfWeek(offset);
+  var sat    = new Date(sun); sat.setDate(sun.getDate() + 6);
+  var weekNo = getWeekNumber(sun);
 
   document.getElementById('weekLabel').textContent = '第' + weekNo + '週';
-  document.getElementById('weekRange').textContent = fmtDate(mon) + ' ～ ' + fmtDate(fri);
+  document.getElementById('weekRange').textContent = fmtDate(sun) + '（' + DAY_SHORTS[0] + '）～' + fmtDate(sat) + '（' + DAY_SHORTS[6] + '）';
   document.getElementById('monthLabel').textContent =
-    mon.getFullYear() + '年' + String(mon.getMonth() + 1).padStart(2, '0') + '月';
+    sun.getFullYear() + '年' + String(sun.getMonth() + 1).padStart(2, '0') + '月';
 
   // Find the week-range row in Sheets (multiple day records grouped)
-  var monStr     = isoDate(mon);
-  var friStr     = isoDate(fri);
+  var sunStr     = isoDate(sun);
+  var satStr     = isoDate(sat);
   var weekReport = null;
   for (var r = 0; r < myReports.length; r++) {
-    if (myReports[r].start_date === monStr && myReports[r].end_date === friStr) {
+    if (myReports[r].start_date === sunStr && myReports[r].end_date === satStr) {
       weekReport = myReports[r];
       break;
     }
@@ -307,8 +337,8 @@ function renderWeek() {
     weekReport.tasks.forEach(function (dayTask) {
       // dayTask is {date, dayShort, workType, notes, redmineTasks, status}
       var taskDate = new Date(dayTask.date + 'T00:00:00'); // parse as local date
-      var dayIndex = Math.round((taskDate - mon) / 86400000);
-      if (dayIndex >= 0 && dayIndex < 5) {
+      var dayIndex = Math.round((taskDate - sun) / 86400000);
+      if (dayIndex >= 0 && dayIndex < 7) {
         tempData[dayIndex].workType     = dayTask.workType     || '在宅勤務';
         tempData[dayIndex].notes        = dayTask.notes        || '';
         tempData[dayIndex].redmineTasks = dayTask.redmineTasks || [];
@@ -318,7 +348,7 @@ function renderWeek() {
     });
   }
   // Merge: preserve optimistic local state when server data hasn't caught up yet
-  for (var k = 0; k < 5; k++) {
+  for (var k = 0; k < 7; k++) {
     if (prevDayData[k] && prevDayData[k].savedStatus && !tempData[k].savedStatus) {
       // Server has no record yet, but we set status locally (optimistic) — keep it
       tempData[k].savedStatus  = prevDayData[k].savedStatus;
@@ -338,8 +368,8 @@ function renderWeek() {
   var weekStatus = weekReport ? weekReport.status : 'none';
   var container  = document.getElementById('dayCards');
   container.innerHTML = '';
-  for (var i = 0; i < 5; i++) {
-    var d = new Date(mon); d.setDate(mon.getDate() + i);
+  for (var i = 0; i < 7; i++) {
+    var d = new Date(sun); d.setDate(sun.getDate() + i);
     container.appendChild(makeDayCard(d, DAY_SHORTS[i], weekStatus, i, weekReport));
   }
 }
@@ -350,7 +380,7 @@ function statusBadgeHtml(status) {
     none:              { label: '未作成',     cls: 'bg-slate-100 text-slate-700' },
     draft:             { label: '作製中',     cls: 'bg-blue-100 text-blue-700' },
     submitted:         { label: '申請中',     cls: 'bg-orange-100 text-orange-700' },
-    reviewer_approved: { label: '確認中',     cls: 'bg-yellow-100 text-yellow-700' },
+    reviewed:          { label: '照査済',     cls: 'bg-yellow-100 text-yellow-700' },
     approved:          { label: '承認済',     cls: 'bg-green-100 text-green-700' },
     rejected:          { label: '差戻し',       cls: 'bg-red-100 text-red-700' },
   };
@@ -361,7 +391,7 @@ function statusBadgeHtml(status) {
 
 // ── Status rank for optimistic merge (higher = further in workflow) ──
 function _statusRank(s) {
-  var ranks = { none: 0, draft: 1, submitted: 2, reviewer_approved: 3, approved: 4, rejected: 0 };
+  var ranks = { none: 0, draft: 1, submitted: 2, reviewed: 3, approved: 4, rejected: 0 };
   return ranks[s] || 0;
 }
 
@@ -603,13 +633,13 @@ function saveDay(idx) {
   dayData[idx].savedStatus = 'draft'; // optimistic — card badge updates immediately
 
   var offset = parseInt(weekSel.value) || 0;
-  var mon    = getMondayOfWeek(offset);
-  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
-  var date   = new Date(mon); date.setDate(mon.getDate() + idx);
+  var sun    = getSundayOfWeek(offset);
+  var sat    = new Date(sun); sat.setDate(sun.getDate() + 6);
+  var date   = new Date(sun); date.setDate(sun.getDate() + idx);
 
   var payload = {
-    startDate:    isoDate(mon),
-    endDate:      isoDate(fri),
+    startDate:    isoDate(sun),
+    endDate:      isoDate(sat),
     date:         isoDate(date),
     dayShort:     DAY_SHORTS[idx],
     workType:     dayData[idx].workType,
@@ -681,12 +711,12 @@ function showDayMsg(idx, msg, ok) {
 // ── Helper to find current week's report from myReports ───────
 function _findWeekReport() {
   var offset = parseInt(weekSel.value) || 0;
-  var mon    = getMondayOfWeek(offset);
-  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
-  var monStr = isoDate(mon);
-  var friStr = isoDate(fri);
+  var sun    = getSundayOfWeek(offset);
+  var sat    = new Date(sun); sat.setDate(sun.getDate() + 6);
+  var sunStr = isoDate(sun);
+  var satStr = isoDate(sat);
   for (var r = 0; r < myReports.length; r++) {
-    if (myReports[r].start_date === monStr && myReports[r].end_date === friStr) {
+    if (myReports[r].start_date === sunStr && myReports[r].end_date === satStr) {
       return myReports[r];
     }
   }
@@ -745,12 +775,12 @@ function syncRedmine(idx) {
 
 function submitWeek() {
   var offset = parseInt(weekSel.value) || 0;
-  var mon    = getMondayOfWeek(offset);
-  var fri    = new Date(mon); fri.setDate(mon.getDate() + 4);
+  var sun    = getSundayOfWeek(offset);
+  var sat    = new Date(sun); sat.setDate(sun.getDate() + 6);
 
   // Check if any days have been saved as drafts
   var hasDrafts = false;
-  for (var c = 0; c < 5; c++) {
+  for (var c = 0; c < 7; c++) {
     if (dayData[c].edited && dayData[c].savedStatus === 'draft') { hasDrafts = true; break; }
   }
   if (!hasDrafts) {
@@ -759,7 +789,7 @@ function submitWeek() {
   }
 
   var days = dayData.map(function (d, i) {
-    var date = new Date(mon); date.setDate(mon.getDate() + i);
+    var date = new Date(sun); date.setDate(sun.getDate() + i);
     return {
       date:         isoDate(date),
       dayShort:     DAY_SHORTS[i],
@@ -771,14 +801,14 @@ function submitWeek() {
   });
 
   var weekPayload = {
-    startDate: isoDate(mon),
-    endDate:   isoDate(fri),
+    startDate: isoDate(sun),
+    endDate:   isoDate(sat),
     days:      days,
   };
 
   // Optimistically update draft → submitted BEFORE server call
   var prevStatuses = [];
-  for (var j = 0; j < 5; j++) {
+  for (var j = 0; j < 7; j++) {
     prevStatuses[j] = dayData[j].savedStatus;
     if (dayData[j].edited && dayData[j].savedStatus === 'draft') {
       dayData[j].savedStatus = 'submitted';
@@ -796,7 +826,7 @@ function submitWeek() {
       btn.disabled  = false;
       if (r && r.error) {
         // Revert optimistic status on error
-        for (var rv = 0; rv < 5; rv++) { dayData[rv].savedStatus = prevStatuses[rv]; }
+        for (var rv = 0; rv < 7; rv++) { dayData[rv].savedStatus = prevStatuses[rv]; }
         renderWeek();
         alert('エラー: ' + r.error);
         return;
@@ -819,7 +849,7 @@ function submitWeek() {
     })
     .withFailureHandler(function () {
       // Revert optimistic status on failure
-      for (var rv = 0; rv < 5; rv++) { dayData[rv].savedStatus = prevStatuses[rv]; }
+      for (var rv = 0; rv < 7; rv++) { dayData[rv].savedStatus = prevStatuses[rv]; }
       renderWeek();
       btn.innerHTML = '申請 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>';
       btn.disabled  = false;
