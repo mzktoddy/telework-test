@@ -474,10 +474,10 @@ function renderCalendar() {
 // ── Status chip (dark background, used in cell pills) ─────────
 function _statusChip(status) {
   var MAP = {
-    approved:          ['承認', 'bg-green-500/25 text-green-300'],
-    submitted:         ['申請中', 'bg-orange-500/25 text-orange-300'],
-    reviewer_approved: ['審査済', 'bg-blue-500/25 text-blue-300'],
-    rejected:          ['差戻',  'bg-red-500/25 text-red-300'],
+    approved: ['承認済み', 'bg-green-500/25 text-green-300'],
+    submitted:['申請中', 'bg-orange-500/25 text-orange-300'],
+    reviewed: ['照査済', 'bg-blue-500/25 text-blue-300'],
+    rejected: ['差戻',  'bg-red-500/25 text-red-300'],
   };
   var info = MAP[status] || ['‐', 'bg-slate-500/25 text-slate-400'];
   return '<span class="flex-shrink-0 text-[10px] px-1 py-0.5 rounded whitespace-nowrap ' +
@@ -487,10 +487,10 @@ function _statusChip(status) {
 // ── Status badge (light background, used in popup) ────────────
 function _statusBadge(status) {
   var MAP = {
-    approved:          ['承認済み', 'bg-green-100 text-green-700'],
-    submitted:         ['申請中',   'bg-orange-100 text-orange-700'],
-    reviewer_approved: ['審査承認', 'bg-blue-100 text-blue-700'],
-    rejected:          ['差戻し',     'bg-red-100 text-red-700'],
+    approved: ['承認済み', 'bg-green-100 text-green-700'],
+    submitted:['申請中',   'bg-orange-100 text-orange-700'],
+    reviewed: ['照査済', 'bg-blue-100 text-blue-700'],
+    rejected: ['差戻',     'bg-red-100 text-red-700'],
   };
   var info = MAP[status] || [status || '‐', 'bg-slate-100 text-slate-500'];
   return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ' +

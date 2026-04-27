@@ -342,16 +342,19 @@ function getMyReports() {
     }
     // Reconstruct day task from individual columns (getMyReports)
     var dayTask = {
+      id:           r.id,
       date:         r.request_date,
       dayShort:     r.day_short || '',
       workType:     r.work_type || '在宅勤務',
       notes:        r.notes || '',
       status:       r.status,   // per-day status for UI badge
       redmineTasks: [],
+      approvals:    [],
     };
     try {
       dayTask.redmineTasks = JSON.parse(r.redmine_tasks || '[]');
     } catch (e) {}
+    dayTask.approvals = getApprovalsByReport(r.id);
     weekMap[key].tasks.push(dayTask);
   });
   
@@ -1024,6 +1027,7 @@ function getMyTaskReports() {
       next_day_plan:   r.next_day_plan || '',
       redmineTasks:    redmineTasks,
       status:          r.status,
+      approvals:       getApprovalsByReport(r.id),
       created_at:      r.created_at,
       updated_at:      r.updated_at,
     };
@@ -1175,6 +1179,106 @@ function submitTaskReport(payload) {
   }
 
   return { success: true, status: 'submitted', id: existingId };
+}
+
+// Delete a telework report day (user can only delete their own draft/rejected reports)
+function deleteTeleworkDay(payload) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  if (!payload || !payload.date || !payload.startDate || !payload.endDate) {
+    return { error: 'データが不足しています' };
+  }
+
+  var sheet = getSheet(SHEET_REPORTS);
+  var data  = sheet.getDataRange().getValues();
+  var empCol    = REPORT_H.indexOf('employee_id');
+  var reqCol    = REPORT_H.indexOf('request_date');
+  var startCol  = REPORT_H.indexOf('start_date');
+  var endCol    = REPORT_H.indexOf('end_date');
+  var statusCol = REPORT_H.indexOf('status');
+  var idCol     = REPORT_H.indexOf('id');
+
+  // Find the record for this employee + this exact day
+  var targetRow = -1;
+  var targetId = null;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][empCol])        === String(user.id) &&
+        _dateStr(data[i][reqCol])      === String(payload.date) &&
+        _dateStr(data[i][startCol])    === String(payload.startDate) &&
+        _dateStr(data[i][endCol])      === String(payload.endDate)) {
+      var status = String(data[i][statusCol]);
+      // Only allow deletion of draft or rejected reports
+      if (status === 'draft' || status === 'rejected') {
+        targetRow = i;
+        targetId = String(data[i][idCol]);
+        break;
+      } else {
+        return { error: 'このステータスの申請は削除できません: ' + status };
+      }
+    }
+  }
+
+  if (targetRow === -1) {
+    return { error: 'レコードが見つかりません' };
+  }
+
+  // Delete the row
+  sheet.deleteRow(targetRow + 1); // +1 because sheet rows are 1-indexed
+  
+  // Also delete associated approvals
+  var approvals = getApprovalsByReport(targetId);
+  approvals.forEach(function(approval) {
+    _deleteRowById(SHEET_APPROVALS, approval.id);
+  });
+
+  return { success: true, message: '削除しました' };
+}
+
+// Delete a task report day (user can only delete their own draft/rejected reports)
+function deleteTaskDay(dateStr) {
+  var user = getCurrentUser();
+  if (!user) return { error: 'Unauthorized' };
+  if (!dateStr) return { error: 'データが不足しています' };
+
+  var sheet = getSheet(SHEET_TASK_REPORTS);
+  var data  = sheet.getDataRange().getValues();
+  var empCol  = TASK_REPORT_H.indexOf('employee_id');
+  var dateCol = TASK_REPORT_H.indexOf('report_date');
+  var statusCol = TASK_REPORT_H.indexOf('status');
+  var idCol = TASK_REPORT_H.indexOf('id');
+
+  // Find the record for this employee + this date
+  var targetRow = -1;
+  var targetId = null;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][empCol]) === String(user.id) &&
+        _dateStr(data[i][dateCol]) === String(dateStr)) {
+      var status = String(data[i][statusCol]);
+      // Only allow deletion of draft or rejected reports
+      if (status === 'draft' || status === 'rejected') {
+        targetRow = i;
+        targetId = String(data[i][idCol]);
+        break;
+      } else {
+        return { error: 'このステータスの日報は削除できません: ' + status };
+      }
+    }
+  }
+
+  if (targetRow === -1) {
+    return { error: 'レコードが見つかりません' };
+  }
+
+  // Delete the row
+  sheet.deleteRow(targetRow + 1); // +1 because sheet rows are 1-indexed
+  
+  // Also delete associated approvals
+  var approvals = getApprovalsByReport(targetId);
+  approvals.forEach(function(approval) {
+    _deleteRowById(SHEET_APPROVALS, approval.id);
+  });
+
+  return { success: true, message: '削除しました' };
 }
 
 // Get pending task reports for reviewers/managers

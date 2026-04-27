@@ -94,11 +94,11 @@
       <div class="space-y-3" id="dayCards"></div>
     </div>
 
-    <!-- 申請 button — fixed at bottom of left panel -->
+    <!-- 申請/再申請 button — fixed at bottom of left panel -->
     <div class="p-8 pt-4 bg-slate-50 border-t border-slate-200">
       <button id="submitWeekBtn" onclick="submitWeek()"
         class="w-full h-11 px-6 bg-slate-900 hover:bg-slate-800 text-white text-lg font-medium rounded-full transition-colors flex items-center justify-center gap-2">
-        申請
+        <span id="submitBtnText">申請</span>
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
         </svg>
@@ -372,6 +372,19 @@ function renderWeek() {
     var d = new Date(sun); d.setDate(sun.getDate() + i);
     container.appendChild(makeDayCard(d, DAY_SHORTS[i], weekStatus, i, weekReport));
   }
+  
+  // Update submit button text - show 再申請 if any day has rejected status
+  var submitBtnText = document.getElementById('submitBtnText');
+  if (submitBtnText) {
+    var hasRejected = false;
+    for (var j = 0; j < 7; j++) {
+      if (dayData[j].savedStatus === 'rejected') {
+        hasRejected = true;
+        break;
+      }
+    }
+    submitBtnText.textContent = hasRejected ? '再申請' : '申請';
+  }
 }
 
 // ── Status badge HTML ─────────────────────────────────────────
@@ -415,7 +428,23 @@ function makeDayCard(d, dayShort, status, idx, weekReport) {
   
   var statusHtml = statusBadgeHtml(dayStatus);
   
-  div.innerHTML = '<div class="flex items-center gap-4">' + dateStr + '<div>' + statusHtml + '</div></div>';
+  // Add delete button for draft or rejected status
+  var deleteBtn = '';
+  if (dayStatus === 'draft' || dayStatus === 'rejected') {
+    deleteBtn = '<button onclick="event.stopPropagation(); deleteDay(' + idx + ', \'' + isoDate(d) + '\');" ' +
+      'class="ml-2 p-1.5 text-red-800 hover:bg-red-100 rounded-lg transition-colors" ' +
+      'title="この日の申請を削除">' +
+      '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" ' +
+          'd="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>' +
+      '</svg>' +   
+    '</button>';
+  }
+  
+  div.innerHTML = '<div class="flex items-center justify-between w-full">' +
+    '<div class="flex items-center gap-4 flex-1">' + dateStr + '<div>' + statusHtml + '</div></div>' +
+    deleteBtn +
+  '</div>';
   
   div.addEventListener('click', function () {
     selectedDayIdx = idx;
@@ -451,12 +480,38 @@ function openDetailPanel(d, dayShort, idx, weekReport) {
     '</div>';
   }
   
+  // Show rejection reason only for this specific day if it's rejected
+  var data = dayData[idx];
+  var rejectionHtml = '';
+  if (data.savedStatus === 'rejected' && weekReport && weekReport.tasks && weekReport.tasks[idx]) {
+    var currentDayTask = weekReport.tasks[idx];
+    if (currentDayTask.approvals && currentDayTask.approvals.length > 0) {
+      var rejectedApprovals = currentDayTask.approvals.filter(function (a) { return a.decision === 'rejected'; });
+      
+      if (rejectedApprovals.length > 0) {
+        rejectionHtml = '<div class="mb-6 p-4 bg-red-50 border-2 border-red-300 rounded-lg">' +
+          '<div class="flex items-start gap-3">' +
+            '<div class="flex-1">' +
+              '<p class="font-semibold text-red-800 text-sm mb-2">差戻し理由</p>' +
+              '<p class="text-xs text-red-600 mb-3">※ この日の申請は差し戻されました。理由を確認して修正後、再申請してください。</p>';
+        rejectedApprovals.forEach(function (a) {
+          var approverLevel = a.level === '1' ? '照査者' : a.level === '2' ? '承認者' : '承認者';
+          rejectionHtml += '<div class="mb-3 pb-3 border-b border-red-200 last:border-0">' +
+            '<p class="text-xs text-red-600 font-medium mb-1">' + approverLevel + 'からの差戻し</p>' +
+            '<p class="text-sm text-red-900">' + escapeHtml(a.comment || '理由が記載されていません') + '</p>' +
+            (a.decided_at ? '<p class="text-xs text-red-500 mt-1">差戻し日時: ' + a.decided_at.split('T')[0] + '</p>' : '') +
+          '</div>';
+        });
+        rejectionHtml += '</div></div></div>';
+      }
+    }
+  }
+  
   document.getElementById('detailDateLabel').textContent =
     dStr + ' ' + dayShort + ' の申請書作成';
 
-  var data  = dayData[idx];
   var panel = document.getElementById('detailPanel');
-  panel.innerHTML = weekInfoHtml +
+  panel.innerHTML = weekInfoHtml + rejectionHtml +
     // Redmine sync card
     '<div class="p-6 mb-6 border-dashed border-2 border-slate-300 bg-blue-50 rounded-lg">' +
       '<div class="flex items-start gap-3">' +
@@ -698,6 +753,63 @@ function cancelDay(idx) {
   renderWeek();
 }
 
+// ── Delete day — removes draft or rejected day from sheet ─────
+function deleteDay(idx, dateStr) {
+  if (!confirm('この日の申請を削除してもよろしいですか？\n\n日付: ' + dateStr + '\n\nこの操作は取り消せません。')) {
+    return;
+  }
+  
+  var offset = parseInt(weekSel.value) || 0;
+  var sun    = getSundayOfWeek(offset);
+  var sat    = new Date(sun); sat.setDate(sun.getDate() + 6);
+  
+  var payload = {
+    startDate: isoDate(sun),
+    endDate:   isoDate(sat),
+    date:      dateStr,
+  };
+  
+  // Close detail panel if this day is selected
+  if (selectedDayIdx === idx) {
+    selectedDayIdx = null;
+    document.getElementById('detailDateLabel').textContent = '日を選択してください';
+    document.getElementById('detailPanel').innerHTML =
+      '<p class="text-sm text-slate-400">削除中...</p>';
+  }
+  
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.error) {
+        alert('削除エラー: ' + r.error);
+        return;
+      }
+      
+      // Clear local state for this day
+      dayData[idx] = { workType: '在宅勤務', notes: '', redmineTasks: [], edited: false, savedStatus: null };
+      
+      // Reload data from server
+      google.script.run
+        .withSuccessHandler(function (data) {
+          if (data && !data.error) {
+            myReports = data;
+            dayData = makeFreshDayData(); // Reset all days
+            renderWeek();
+            document.getElementById('detailPanel').innerHTML =
+              '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
+          }
+        })
+        .getMyReports();
+    })
+    .withFailureHandler(function (err) {
+      alert('削除に失敗しました: ' + (err && err.message ? err.message : '不明なエラー'));
+      if (selectedDayIdx === idx) {
+        document.getElementById('detailPanel').innerHTML =
+          '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
+      }
+    })
+    .deleteTeleworkDay(payload);
+}
+
 function showDayMsg(idx, msg, ok) {
   var el = document.getElementById('dayMsg_' + idx);
   if (!el) return;
@@ -777,14 +889,27 @@ function submitWeek() {
   var offset = parseInt(weekSel.value) || 0;
   var sun    = getSundayOfWeek(offset);
   var sat    = new Date(sun); sat.setDate(sun.getDate() + 6);
+  
+  // Check if it's a resubmission by looking for any rejected days
+  var hasRejectedDays = false;
+  for (var rc = 0; rc < 7; rc++) {
+    if (dayData[rc].savedStatus === 'rejected') {
+      hasRejectedDays = true;
+      break;
+    }
+  }
+  var isResubmission = hasRejectedDays;
 
-  // Check if any days have been saved as drafts
+  // Check if any days have been saved as drafts or are rejected
   var hasDrafts = false;
   for (var c = 0; c < 7; c++) {
-    if (dayData[c].edited && dayData[c].savedStatus === 'draft') { hasDrafts = true; break; }
+    if (dayData[c].edited && (dayData[c].savedStatus === 'draft' || dayData[c].savedStatus === 'rejected')) { 
+      hasDrafts = true; 
+      break; 
+    }
   }
   if (!hasDrafts) {
-    alert('申請する日がありません。\n\n先に「保存」ボタンで日ごとに下書き保存してください。');
+    alert((isResubmission ? '再申請' : '申請') + 'する日がありません。\n\n先に「保存」ボタンで日ごとに下書き保存してください。');
     return;
   }
 
@@ -806,23 +931,25 @@ function submitWeek() {
     days:      days,
   };
 
-  // Optimistically update draft → submitted BEFORE server call
+  // Optimistically update draft/rejected → submitted BEFORE server call
   var prevStatuses = [];
   for (var j = 0; j < 7; j++) {
     prevStatuses[j] = dayData[j].savedStatus;
-    if (dayData[j].edited && dayData[j].savedStatus === 'draft') {
+    if (dayData[j].edited && (dayData[j].savedStatus === 'draft' || dayData[j].savedStatus === 'rejected')) {
       dayData[j].savedStatus = 'submitted';
     }
   }
   renderWeek();
 
   var btn = document.getElementById('submitWeekBtn');
-  btn.innerHTML  = '申請中...';
+  var submitBtnText = document.getElementById('submitBtnText');
+  var actionText = isResubmission ? '再申請' : '申請';
+  if (submitBtnText) submitBtnText.textContent = actionText + '中...';
   btn.disabled   = true;
 
   google.script.run
     .withSuccessHandler(function (r) {
-      btn.innerHTML = '申請 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>';
+      if (submitBtnText) submitBtnText.textContent = actionText;
       btn.disabled  = false;
       if (r && r.error) {
         // Revert optimistic status on error
@@ -834,7 +961,7 @@ function submitWeek() {
       
       var count = (r.reports && r.reports.length) ? r.reports.length : 0;
       if (count > 0) {
-        alert('✅ ' + count + '日分の申請を送信しました\n\nステータス: 申請中 (承認待ち)');
+        alert('✅ ' + count + '日分の' + actionText + 'を送信しました\n\nステータス: 申請中 (承認待ち)');
       }
       
       // Fetch latest data from server to sync
@@ -851,7 +978,7 @@ function submitWeek() {
       // Revert optimistic status on failure
       for (var rv = 0; rv < 7; rv++) { dayData[rv].savedStatus = prevStatuses[rv]; }
       renderWeek();
-      btn.innerHTML = '申請 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>';
+      if (submitBtnText) submitBtnText.textContent = actionText;
       btn.disabled  = false;
       alert('申請に失敗しました。もう一度お試しください。');
     })

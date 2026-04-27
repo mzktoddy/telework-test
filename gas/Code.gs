@@ -527,3 +527,176 @@ function getTokyoWeather() {
     return { error: e.toString() };
   }
 }
+
+// ============================================================
+//  Daily Pending Notification Scheduler
+//
+//  SETUP: Run setupDailyTrigger() ONCE from the GAS editor.
+//         This installs a time-driven trigger that fires every
+//         day at 9 AM JST. Weekend days are skipped automatically.
+//
+//  LOGIC:
+//    • Reviewers  → notified about 'submitted' reports from
+//                   employees in their departments.
+//    • Managers   → notified about 'reviewer_approved' reports
+//                   from employees in their departments.
+//  Both telework_reports (在宅勤務許可申請書) and
+//  task_reports (在宅勤務報告書) are checked separately.
+// ============================================================
+
+function sendDailyPendingNotifications() {
+  // Determine current weekday in Japan Standard Time
+  var now    = new Date();
+  var jstNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+  var dow    = jstNow.getDay(); // 0=Sun … 6=Sat
+  if (dow === 0 || dow === 6) {
+    Logger.log('Skipping: weekend');
+    return;
+  }
+
+  var WEEKDAYS_JP = ['日', '月', '火', '水', '木', '金', '土'];
+  var todayLabel  = Utilities.formatDate(jstNow, 'Asia/Tokyo', 'yyyy/MM/dd') +
+                   '（' + WEEKDAYS_JP[dow] + '）';
+
+  var allUsers       = getAllUsers().filter(function(u) { return u.is_active; });
+  var allReports     = getAllReports();
+  var allTaskReports = getAllTaskReports();
+  var systemUrl      = ScriptApp.getService().getUrl();
+
+  // ── Helpers ──────────────────────────────────────────────
+  function getDeptIds(user) {
+    if (!user.department_id) return [];
+    try {
+      var parsed = JSON.parse(user.department_id);
+      return Array.isArray(parsed) ? parsed : [String(user.department_id)];
+    } catch (e) { return [String(user.department_id)]; }
+  }
+
+  function getEmpIdsForDepts(deptIds) {
+    return allUsers
+      .filter(function(u) {
+        if (u.role !== 'employee') return false;
+        var ud = getDeptIds(u);
+        return ud.some(function(d) { return deptIds.indexOf(d) >= 0; });
+      })
+      .map(function(u) { return u.id; });
+  }
+
+  // Mattermost @mention: use the part before @ in their email
+  function getMention(user) {
+    return user.email ? user.email.split('@')[0].replace(/\./g, '-') : (user.name || 'user');
+  }
+
+  // Send one Mattermost webhook message per user
+  function notify(user, header, rows) {
+    if (!rows.length) return;
+    var mention = getMention(user);
+
+    // Markdown table
+    var table = '| 書類 | 件数 |\n| :--- | ---: |\n';
+    rows.forEach(function(r) { table += '| ' + r.label + ' | ' + r.count + ' 件 |\n'; });
+
+    var text = todayLabel + header + '\n\n' +
+               '@' + mention + '\n\n' +
+               table + '\n' +
+               '[内容を確認する](' + systemUrl + '?page=approve)';
+
+    try {
+      UrlFetchApp.fetch(MATTERMOST_WEBHOOK_URL, {
+        method:           'POST',
+        contentType:      'application/json',
+        payload:          JSON.stringify({
+          text:        text,
+          channel:     'daily-report',
+          username:    '日報管理システム',
+          icon_emoji:  ':bell:',
+        }),
+        muteHttpExceptions: true,
+      });
+      Logger.log('Notified @' + mention);
+    } catch (e) {
+      Logger.log('Failed to notify @' + mention + ': ' + e.toString());
+    }
+  }
+
+  // ── Notify reviewers: 'submitted' reports ────────────────
+  allUsers.filter(function(u) { return u.role === 'reviewer'; })
+    .forEach(function(reviewer) {
+      var deptIds = getDeptIds(reviewer);
+      if (!deptIds.length) return;
+      var empIds  = getEmpIdsForDepts(deptIds);
+      if (!empIds.length) return;
+
+      var pendingTelework = allReports.filter(function(r) {
+        return r.status === 'submitted' && empIds.indexOf(r.employee_id) >= 0;
+      });
+      var pendingTask = allTaskReports.filter(function(r) {
+        return r.status === 'submitted' && empIds.indexOf(r.employee_id) >= 0;
+      });
+
+      var rows = [];
+      if (pendingTelework.length) rows.push({ label: '在宅勤務許可申請書', count: pendingTelework.length });
+      if (pendingTask.length)     rows.push({ label: '在宅勤務報告書',     count: pendingTask.length });
+
+      notify(reviewer, '照査依頼が届いています。', rows);
+    });
+
+  // ── Notify managers: 'reviewer_approved' reports ─────────
+  allUsers.filter(function(u) { return u.role === 'manager'; })
+    .forEach(function(manager) {
+      var deptIds = getDeptIds(manager);
+      if (!deptIds.length) return;
+      var empIds  = getEmpIdsForDepts(deptIds);
+      if (!empIds.length) return;
+
+      var pendingTelework = allReports.filter(function(r) {
+        return r.status === 'reviewer_approved' && empIds.indexOf(r.employee_id) >= 0;
+      });
+      var pendingTask = allTaskReports.filter(function(r) {
+        return r.status === 'reviewer_approved' && empIds.indexOf(r.employee_id) >= 0;
+      });
+
+      var rows = [];
+      if (pendingTelework.length) rows.push({ label: '在宅勤務許可申請書', count: pendingTelework.length });
+      if (pendingTask.length)     rows.push({ label: '在宅勤務報告書',     count: pendingTask.length });
+
+      notify(manager, '承認依頼が届いています。', rows);
+    });
+
+  Logger.log('sendDailyPendingNotifications: done');
+}
+
+// ── Install the daily trigger (run once from GAS editor) ─────
+// Fires every day at 9 AM Asia/Tokyo; weekend skip is handled
+// inside sendDailyPendingNotifications().
+function setupDailyTrigger() {
+  // Remove any existing trigger to avoid duplicates
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'sendDailyPendingNotifications') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  ScriptApp.newTrigger('sendDailyPendingNotifications')
+    .timeBased()
+    .everyDays(1)
+    .atHour(9)          // 9 AM in the project timezone
+    .inTimezone('Asia/Tokyo')
+    .create();
+
+  Logger.log('✅ Daily trigger installed: 9 AM JST weekdays');
+  return '✅ Trigger installed';
+}
+
+// ── Remove the daily trigger ─────────────────────────────────
+function removeDailyTrigger() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'sendDailyPendingNotifications') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  Logger.log('Removed ' + removed + ' trigger(s)');
+  return 'Removed ' + removed + ' trigger(s)';
+}

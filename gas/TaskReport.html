@@ -237,7 +237,7 @@ var dayData        = makeFreshDayData();
 
 function makeFreshDayData() {
   return [0,1,2,3,4,5,6].map(function () {
-    return { importantIssues: '', nextDayPlan: '', redmineTasks: [], edited: false, savedStatus: null };
+    return { importantIssues: '', nextDayPlan: '', redmineTasks: [], approvals: [], edited: false, savedStatus: null };
   });
 }
 
@@ -292,6 +292,7 @@ function renderWeek() {
       tempData[i].importantIssues = match.important_issues || '';
       tempData[i].nextDayPlan     = match.next_day_plan || '';
       tempData[i].redmineTasks    = match.redmineTasks || [];
+      tempData[i].approvals       = match.approvals || [];
       tempData[i].edited          = true;
       tempData[i].savedStatus     = match.status;
     }
@@ -345,13 +346,31 @@ function makeDayCard(d, dayShort, idx) {
     selectedDayIdx === idx ? 'border-blue-400 border-2' : 'border-slate-200',
   ].join(' ');
 
+  var statusHtml = statusBadgeHtml(dayStatus);
+  
+  // Add delete button for draft or rejected status
+  var deleteBtn = '';
+  if (dayStatus === 'draft' || dayStatus === 'rejected') {
+    deleteBtn = '<button onclick="event.stopPropagation(); deleteTaskDay(' + idx + ', \'' + isoDate(d) + '\');" ' +
+      'class="ml-2 p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors" ' +
+      'title="この日の日報を削除">' +
+      '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" ' +
+          'd="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>' +
+      '</svg>' +
+    '</button>';
+  }
+
   div.innerHTML =
-    '<div class="flex items-center gap-4">' +
-      '<div class="flex flex-col items-center justify-center border-slate-300 border-2 p-2 bg-blue-50 rounded-md min-w-16 h-16">' +
-        '<span class="text-2xl font-bold text-slate-900">' + d.getDate() + '</span>' +
-        '<span class="text-xs font-medium text-amber-900 uppercase mt-1">' + dayShort + '</span>' +
+    '<div class="flex items-center justify-between w-full">' +
+      '<div class="flex items-center gap-4 flex-1">' +
+        '<div class="flex flex-col items-center justify-center border-slate-300 border-2 p-2 bg-blue-50 rounded-md min-w-16 h-16">' +
+          '<span class="text-2xl font-bold text-slate-900">' + d.getDate() + '</span>' +
+          '<span class="text-xs font-medium text-amber-900 uppercase mt-1">' + dayShort + '</span>' +
+        '</div>' +
+        '<div>' + statusHtml + '</div>' +
       '</div>' +
-      '<div>' + statusBadgeHtml(dayStatus) + '</div>' +
+      deleteBtn +
     '</div>';
 
   div.addEventListener('click', function () {
@@ -372,8 +391,29 @@ function openDetailPanel(d, dayShort, idx) {
   document.getElementById('detailDateLabel').textContent =
     dStr + ' ' + dayShort + ' の日報作成';
 
+  // Show rejection reason if rejected
+  var rejectionHtml = '';
+  if (data.savedStatus === 'rejected' && data.approvals && data.approvals.length > 0) {
+    var rejectedApprovals = data.approvals.filter(function (a) { return a.decision === 'rejected'; });
+    if (rejectedApprovals.length > 0) {
+      rejectionHtml = '<div class="mb-6 p-4 bg-red-50 border-2 border-red-300 rounded-lg">' +
+        '<div class="flex items-start gap-3">' +
+          '<div class="flex-1">' +
+            '<p class="font-semibold text-red-800 text-sm mb-2">差戻し理由</p>';
+      rejectedApprovals.forEach(function (a) {
+        var approverLevel = a.level === '1' ? '照査者' : a.level === '2' ? '承認者' : '承認者';
+        rejectionHtml += '<div class="mb-2 pb-2 border-b border-red-200 last:border-0">' +
+          '<p class="text-xs text-red-600 font-medium mb-1">' + approverLevel + 'からの差戻し</p>' +
+          '<p class="text-sm text-red-900">' + escapeHtml(a.comment || '理由が記載されていません') + '</p>' +
+          (a.decided_at ? '<p class="text-xs text-red-500 mt-1">差戻し日時: ' + a.decided_at.split('T')[0] + '</p>' : '') +
+        '</div>';
+      });
+      rejectionHtml += '</div></div></div>';
+    }
+  }
+
   var panel = document.getElementById('detailPanel');
-  panel.innerHTML =
+  panel.innerHTML = rejectionHtml +
     // Redmine time entries card
     '<div class="p-6 mb-6 border-dashed border-2 border-slate-300 bg-blue-50 rounded-lg">' +
       '<div class="flex items-start gap-3">' +
@@ -705,6 +745,53 @@ function cancelTaskDay(idx) {
   document.getElementById('detailPanel').innerHTML =
     '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
   renderWeek();
+}
+
+// ── Delete task day — removes draft or rejected day from sheet ─
+function deleteTaskDay(idx, dateStr) {
+  if (!confirm('この日の日報を削除してもよろしいですか？\n\n日付: ' + dateStr + '\n\nこの操作は取り消せません。')) {
+    return;
+  }
+  
+  // Close detail panel if this day is selected
+  if (selectedDayIdx === idx) {
+    selectedDayIdx = null;
+    document.getElementById('detailDateLabel').textContent = '日を選択してください';
+    document.getElementById('detailPanel').innerHTML =
+      '<p class="text-sm text-slate-400">削除中...</p>';
+  }
+  
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.error) {
+        alert('削除エラー: ' + r.error);
+        return;
+      }
+      
+      // Clear local state for this day
+      dayData[idx] = { importantIssues: '', nextDayPlan: '', redmineTasks: [], approvals: [], edited: false, savedStatus: null };
+      
+      // Reload data from server
+      google.script.run
+        .withSuccessHandler(function (data) {
+          if (data && !data.error) {
+            myTaskReports = data;
+            dayData = makeFreshDayData(); // Reset all days
+            renderWeek();
+            document.getElementById('detailPanel').innerHTML =
+              '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
+          }
+        })
+        .getMyTaskReports();
+    })
+    .withFailureHandler(function (err) {
+      alert('削除に失敗しました: ' + (err && err.message ? err.message : '不明なエラー'));
+      if (selectedDayIdx === idx) {
+        document.getElementById('detailPanel').innerHTML =
+          '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
+      }
+    })
+    .deleteTaskDay(dateStr);
 }
 
 function showDayMsg(idx, msg, ok) {
