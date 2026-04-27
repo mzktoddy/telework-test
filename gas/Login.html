@@ -24,7 +24,7 @@
     <!-- Header -->
     <div class="space-y-4 text-center pt-8 px-6">
       <div class="flex justify-center mb-2">
-        <img id="logoImg" src="" alt="Logo" class="h-12 w-12 rounded-lg object-cover" />
+        <img id="logoImg" src="https://drive.google.com/thumbnail?id=1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D&sz=w300" alt="Logo" class="h-12 w-12 rounded-lg object-cover" />
       </div>
       <div>
         <h1 class="text-2xl font-bold tracking-tight">Mamiya ITS</h1>
@@ -119,21 +119,21 @@
     var gwsSessionEmail = '';
 
     // ── On page load: get GWS session email + try silent auto-login ──
-    window.addEventListener('load', function () {
+    //\window.addEventListener('load', function () {
     //   showInfo('Google Workspaceセッションを確認中...');
 
       // Load logo image from Google Drive as base64
-      var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; // Replace with your file ID
-      google.script.run
-        .withSuccessHandler(function (base64Image) {
-          if (base64Image) {
-            document.getElementById('logoImg').src = base64Image;
-          }
-        })
-        .withFailureHandler(function (error) {
-          console.error('Failed to load logo:', error);
-        })
-        .getImageAsBase64(logoFileId);
+      //var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; // Replace with your file ID
+      // google.script.run
+      //   .withSuccessHandler(function (base64Image) {
+      //     if (base64Image) {
+      //       document.getElementById('logoImg').src = base64Image;
+      //     }
+      //   })
+      //   .withFailureHandler(function (error) {
+      //     console.error('Failed to load logo:', error);
+      //   })
+      //   .getImageAsBase64(logoFileId);
 
     //   // Step 1: get the GWS session email for client-side hint logic
     //   google.script.run
@@ -159,7 +159,7 @@
     //     })
     //     .withFailureHandler(function () { clearMessages(); })
     //     .getGwsSessionEmail();
-    });
+    //});
 
     // ── Email blur: detect GWS session match → update password hint ──
     //  PASSWORD is accepted from ONE of two sources:

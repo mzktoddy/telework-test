@@ -1,3 +1,38 @@
+// Export an array of plain objects to a NEW spreadsheet file in a specific Drive folder
+function adminExportToNewSpreadsheet(rows, sheetTitle) {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  if (!rows || rows.length === 0) return { error: 'データがありません' };
+
+  // Folder ID for マミヤITソリューションズ/Exported (user provided)
+  var folderId = '1Fbl8fcqqAXLIqWQ7UybXD8sGMU3elz6r';
+  var folder = DriveApp.getFolderById(folderId);
+
+  var name = sheetTitle || ('エクスポート_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd_HH-mm'));
+  var ss = SpreadsheetApp.create(name);
+  var file = DriveApp.getFileById(ss.getId());
+  folder.addFile(file);
+  DriveApp.getRootFolder().removeFile(file); // Remove from My Drive root
+
+  var sheet = ss.getActiveSheet();
+  var headers = Object.keys(rows[0]);
+  sheet.clear();
+  sheet.getRange(1, 1, 1, headers.length)
+       .setValues([headers])
+       .setFontWeight('bold')
+       .setBackground('#1e293b')
+       .setFontColor('#ffffff');
+
+  var dataRows = rows.map(function (r) {
+    return headers.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  });
+  if (dataRows.length > 0) {
+    sheet.getRange(2, 1, dataRows.length, headers.length).setValues(dataRows);
+  }
+  SpreadsheetApp.flush();
+
+  return { success: true, url: ss.getUrl(), fileId: ss.getId(), fileName: name };
+}
 // ============================================================
 //  Sheets.gs — Google Sheets data layer
 //

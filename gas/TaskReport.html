@@ -33,7 +33,7 @@
   <div class="p-6 border-b border-slate-700">
     <div class="flex items-center justify-center gap-3">
       <div class="bg-blue-100 rounded-md text-sm font-bold">
-        <img src="" id="logoImg" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
+        <img id="logoImg" src="https://drive.google.com/thumbnail?id=1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D&sz=w300" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
       </div>
       <div>
         <p class="text-sm font-semibold">マミヤ</p>
@@ -171,13 +171,6 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
     nav.appendChild(a);
   });
 })();
-
-// ── Load logo ─────────────────────────────────────────────────
-var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D';
-google.script.run
-  .withSuccessHandler(function (b) { if (b) document.getElementById('logoImg').src = b; })
-  .withFailureHandler(function () {})
-  .getImageAsBase64(logoFileId);
 
 // ── Week helpers ──────────────────────────────────────────────
 function getWeekNumber(d) {
@@ -530,8 +523,9 @@ function renderRedmineTasks(idx, tasks, fromSavedData) {
 function syncRedmineEntries(idx, dateStr) {
   var btn = document.getElementById('syncBtn_' + idx);
   if (!btn) return;
-  btn.textContent = '同期中...';
+  btn.innerHTML = '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-slate-600/30 border-t-slate-600 rounded-full animate-spin"></div>同期中...</div>';
   btn.disabled = true;
+  btn.classList.add('opacity-75', 'cursor-not-allowed');
   google.script.run
     .withSuccessHandler(function (result) {
       var msgEl = document.getElementById('redmineList_' + idx);
@@ -539,6 +533,7 @@ function syncRedmineEntries(idx, dateStr) {
         if (msgEl) msgEl.innerHTML = '<p class="text-xs text-red-600 italic">' + escapeHtml(result.error) + '</p>';
         btn.textContent = 'Redmine実績と同期';
         btn.disabled = false;
+        btn.classList.remove('opacity-75', 'cursor-not-allowed');
         return;
       }
       var tasks = Array.isArray(result) ? result : [];
@@ -547,11 +542,13 @@ function syncRedmineEntries(idx, dateStr) {
         if (msgEl) msgEl.innerHTML = '<p class="text-xs text-slate-500 italic">この日の作業実績が見つかりません</p>';
         btn.textContent = 'Redmine実績と同期';
         btn.disabled = false;
+        btn.classList.remove('opacity-75', 'cursor-not-allowed');
         return;
       }
       renderRedmineTasks(idx, tasks, false);
       btn.textContent = 'Redmine実績を再読み込み';
       btn.disabled = false;
+      btn.classList.remove('opacity-75', 'cursor-not-allowed');
     })
     .withFailureHandler(function (err) {
       var msgEl = document.getElementById('redmineList_' + idx);
@@ -561,6 +558,7 @@ function syncRedmineEntries(idx, dateStr) {
       }
       btn.textContent = 'Redmine実績と同期';
       btn.disabled = false;
+      btn.classList.remove('opacity-75', 'cursor-not-allowed');
     })
     .getRedmineTimeEntries(dateStr);
 }
@@ -590,11 +588,17 @@ function saveTaskDay(idx) {
 
   renderWeek();
   openDetailPanel(date, DAY_SHORTS[idx], idx);
-  showDayMsg(idx, '保存中...', true);
+  showDayMsg(idx, '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-green-600/30 border-t-green-600 rounded-full animate-spin"></div>保存中...</div>', true);
+  
+  // Disable save button during save
+  var saveBtn = document.querySelector('button[onclick="saveTaskDay(' + idx + ')"]');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.classList.add('opacity-50', 'cursor-not-allowed'); }
 
   google.script.run
-    .withSuccessHandler(function (r) {
-      if (r && r.error) {
+    .withSuccessHandler(function (r) {      // Re-enable save button
+      var saveBtn = document.querySelector('button[onclick="saveTaskDay(' + idx + ')"]');
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+            if (r && r.error) {
         dayData[idx].savedStatus = null;
         dayData[idx].edited = false;
         renderWeek();
@@ -614,6 +618,10 @@ function saveTaskDay(idx) {
         .getMyTaskReports();
     })
     .withFailureHandler(function () {
+      // Re-enable save button
+      var saveBtn = document.querySelector('button[onclick="saveTaskDay(' + idx + ')"]');
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+      
       dayData[idx].savedStatus = null;
       dayData[idx].edited = false;
       renderWeek();
@@ -650,10 +658,18 @@ function submitTaskDay(idx) {
 
     renderWeek();
     openDetailPanel(date, DAY_SHORTS[idx], idx);
-    showDayMsg(idx, '保存して申請中...', true);
+    showDayMsg(idx, '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-green-600/30 border-t-green-600 rounded-full animate-spin"></div>保存して申請中...</div>', true);
+    
+    // Disable submit button
+    var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('opacity-50', 'cursor-not-allowed'); }
 
     google.script.run
       .withSuccessHandler(function (r) {
+        // Re-enable submit button
+        var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        
         if (r && r.error) {
           dayData[idx].savedStatus = null;
           renderWeek();
@@ -665,6 +681,10 @@ function submitTaskDay(idx) {
         _doSubmit(idx, date);
       })
       .withFailureHandler(function () {
+        // Re-enable submit button
+        var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        
         dayData[idx].savedStatus = null;
         renderWeek();
         openDetailPanel(date, DAY_SHORTS[idx], idx);
@@ -689,14 +709,28 @@ function submitTaskDay(idx) {
     };
     renderWeek();
     openDetailPanel(date, DAY_SHORTS[idx], idx);
-    showDayMsg(idx, '申請中...', true);
+    showDayMsg(idx, '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-green-600/30 border-t-green-600 rounded-full animate-spin"></div>申請中...</div>', true);
+    
+    // Disable submit button
+    var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('opacity-50', 'cursor-not-allowed'); }
 
     google.script.run
       .withSuccessHandler(function (r) {
+        // Re-enable submit button
+        var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        
         if (r && r.error) { showDayMsg(idx, r.error, false); return; }
         _doSubmit(idx, date);
       })
-      .withFailureHandler(function () { showDayMsg(idx, '保存に失敗しました', false); })
+      .withFailureHandler(function () {
+        // Re-enable submit button
+        var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        
+        showDayMsg(idx, '保存に失敗しました', false);
+      })
       .saveTaskReportDraft(updatePayload);
     return;
   }
@@ -709,9 +743,17 @@ function _doSubmit(idx, date) {
   dayData[idx].savedStatus = 'submitted';
   renderWeek();
   openDetailPanel(date, DAY_SHORTS[idx], idx);
+  
+  // Disable submit button during submission
+  var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('opacity-50', 'cursor-not-allowed'); }
 
   google.script.run
     .withSuccessHandler(function (r) {
+      // Re-enable submit button
+      var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+      
       if (r && r.error) {
         dayData[idx].savedStatus = 'draft';
         renderWeek();
@@ -731,6 +773,10 @@ function _doSubmit(idx, date) {
         .getMyTaskReports();
     })
     .withFailureHandler(function () {
+      // Re-enable submit button
+      var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+      
       dayData[idx].savedStatus = 'draft';
       renderWeek();
       openDetailPanel(date, DAY_SHORTS[idx], idx);
@@ -797,7 +843,7 @@ function deleteTaskDay(idx, dateStr) {
 function showDayMsg(idx, msg, ok) {
   var el = document.getElementById('dayMsg_' + idx);
   if (!el) return;
-  el.textContent = msg;
+  el.innerHTML = msg;
   el.className = 'mt-3 text-sm text-center p-2 rounded-md ' +
     (ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
   el.classList.remove('hidden');

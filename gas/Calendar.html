@@ -35,7 +35,7 @@
   <div class="p-6 border-b border-slate-700">
     <div class="flex items-center justify-center gap-3">
       <div class="bg-blue-100 rounded-md text-sm font-bold">
-        <img src="" id="logoImg" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
+        <img id="logoImg" src="https://drive.google.com/thumbnail?id=1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D&sz=w300" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
       </div>
       <div>
         <p class="text-sm font-semibold">マミヤ</p>
@@ -238,12 +238,6 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
   });
 })();
 
-// ── Load logo ─────────────────────────────────────────────────
-var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D';
-google.script.run
-  .withSuccessHandler(function (b) { if (b) document.getElementById('logoImg').src = b; })
-  .withFailureHandler(function () {})
-  .getImageAsBase64(logoFileId);
 
 // ── Logout ─────────────────────────────────────────────────────
 function logout() {

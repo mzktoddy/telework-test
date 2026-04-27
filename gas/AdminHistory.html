@@ -35,7 +35,7 @@
   <div class="p-6 border-b border-slate-700">
     <div class="flex items-center justify-center gap-3">
       <div class="bg-blue-100 rounded-md text-sm font-bold">
-        <img src="" id="logoImg" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
+        <img id="logoImg" src="https://drive.google.com/thumbnail?id=1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D&sz=w300" alt="Logo" class="h-10 w-10 rounded-lg object-cover flex-shrink-0 w-18 brightness-300 h-auto hue-rotate-20" />
       </div>
       <div>
         <p class="text-sm font-semibold">マミヤ</p>
@@ -225,12 +225,6 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
   });
 })();
 
-// ── Load logo ─────────────────────────────────────────────────
-var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D';
-google.script.run
-  .withSuccessHandler(function (b) { if (b) document.getElementById('logoImg').src = b; })
-  .withFailureHandler(function () {})
-  .getImageAsBase64(logoFileId);
 
 // ── Logout ─────────────────────────────────────────────────────
 function logout() {
@@ -261,7 +255,7 @@ function statusBadge(status) {
     submitted:         ['申請中',   'bg-orange-100 text-orange-700'],
     draft:             ['未作成',   'bg-slate-100 text-slate-500'],
     rejected:          ['差戻し',     'bg-red-100 text-red-700'],
-    reviewer_approved: ['審査承認', 'bg-blue-100 text-blue-700'],
+    reviewed:         ['審査承認', 'bg-blue-100 text-blue-700'],
   };
   var info = MAP[status] || [status || '‐', 'bg-slate-100 text-slate-500'];
   return '<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ' +
@@ -274,7 +268,7 @@ function statusLabel(status) {
     submitted:         '申請中',
     draft:             '未作成',
     rejected:          '差戻し',
-    reviewer_approved: '審査承認',
+    reviewed:          '審査承認',
   };
   return MAP[status] || status || '';
 }
@@ -629,7 +623,15 @@ function exportToSheet() {
     .withSuccessHandler(function (res) {
       document.getElementById('pageLoader').classList.add('hidden');
       if (res && res.success) {
-        showToast('「' + res.sheetName + '」に ' + rows.length + '件書き込みました');
+        showToast('スプレッドシート「' + (res.fileName || title) + '」に ' + rows.length + '件書き込みました');
+        if (res.url) {
+          const a = document.createElement('a');
+          a.href = res.url;
+          a.target = '_blank';
+          a.textContent = '→ スプレッドシートを開く';
+          a.className = 'ml-2 text-blue-600 underline';
+          document.body.appendChild(a);
+        }
       } else {
         showToast((res && res.error) ? res.error : 'エクスポートに失敗しました', true);
       }
@@ -638,7 +640,7 @@ function exportToSheet() {
       document.getElementById('pageLoader').classList.add('hidden');
       showToast('エラー: ' + ((err && err.message) || '不明'), true);
     })
-    .adminExportToSheet(rows, title);
+    .adminExportToNewSpreadsheet(rows, title);
 }
 
 // ── Redmine official logo SVG (inline) ───────────────────────
