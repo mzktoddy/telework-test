@@ -173,7 +173,7 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
     a.href = SCRIPT_URL + '?page=' + item.page;
     a.className = [
       'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
-      item.active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+      item.active ? 'bg-cyan-900 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
     ].join(' ');
     a.innerHTML =
       '<svg class="w-4 h-4 flex-shrink-0 ' + item.color + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
@@ -300,8 +300,8 @@ function getApprovalButton(report) {
   
   // For submitted status: show "照査" button
   if (status === 'submitted') {
-    return '<button onclick="doReview(\'' + report.id + '\')" ' +
-      'class="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-sm font-medium transition-colors">' +
+    return '<button id="actionApproveBtn" onclick="doReview(\'' + report.id + '\')" ' +
+      'class="flex-1 h-10 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-sm font-medium transition-colors">' +
       '照査 ✓' +
     '</button>';
   }
@@ -309,8 +309,8 @@ function getApprovalButton(report) {
   // For reviewed status: only managers and admins can approve
   if (status === 'reviewed') {
     if (userRole === 'manager' || userRole === 'admin') {
-      return '<button onclick="doApprove(\'' + report.id + '\')" ' +
-        'class="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-sm font-medium transition-colors">' +
+      return '<button id="actionApproveBtn" onclick="doApprove(\'' + report.id + '\')" ' +
+        'class="flex-1 h-10 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-sm font-medium transition-colors">' +
         '承認 ✓' +
       '</button>';
     } else {
@@ -322,7 +322,7 @@ function getApprovalButton(report) {
   }
   
   // Default: show approve button (for backward compatibility)
-  return '<button onclick="doApprove(\'' + report.id + '\')" ' +
+  return '<button id="actionApproveBtn" onclick="doApprove(\'' + report.id + '\')" ' +
     'class="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-sm font-medium transition-colors">' +
     '承認 ✓' +
   '</button>';
@@ -501,12 +501,13 @@ function openTeleworkDetail(r) {
       // Single comment and approve/reject for entire request
       '<div class="border-t border-slate-200 pt-5 mt-5">' +
         '<label class="text-xs font-medium text-slate-700 block mb-2">承認者コメント</label>' +
-        '<textarea id="approverComment" rows="3" placeholder="コメントを入力（任意）" ' +
+        '<textarea id="approverComment" rows="3" placeholder="コメントを入力（差戻しの場合は必須）" ' +
+          'oninput="this.classList.remove(\"border-red-400\",\"ring-1\",\"ring-red-400\")" ' +
           'class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm resize-none ' +
           'focus:outline-none focus:ring-2 focus:ring-blue-300 mb-3"></textarea>' +
         '<div class="flex gap-3">' +
-          '<button onclick="doReject(\'' + r.id + '\')" ' +
-            'class="flex-1 h-10 border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">' +
+          '<button id="actionRejectBtn" onclick="doReject(\'' + r.id + '\')" ' +
+            'class="flex-1 h-10 border border-red-300 text-red-600 rounded-full text-sm font-medium hover:bg-red-50 transition-colors">' +
             '差戻し' +
           '</button>' +
           getApprovalButton(r) +
@@ -540,23 +541,23 @@ function openTaskReportDetail(r) {
   }
 
   // Approval summary
-  var approvalHtml = '';
-  if (Array.isArray(r.approvals) && r.approvals.length) {
-    approvalHtml = '<div>' +
-      '<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">承認状況</p>' +
-      '<div class="space-y-2">' +
-      r.approvals.map(function (a) {
-        var levelLabel = String(a.level) === '1' ? 'レビュアー' : 'マネージャー';
-        var decBadge = a.decision === 'approved' ? statusBadge('approved') :
-                       a.decision === 'rejected' ? statusBadge('rejected') :
-                       '<span class="text-xs text-slate-400">未確認</span>';
-        return '<div class="flex items-center justify-between bg-slate-50 rounded p-2">' +
-          '<span class="text-xs text-slate-600">' + levelLabel + '</span>' +
-          decBadge +
-        '</div>';
-      }).join('') +
-      '</div></div>';
-  }
+  // var approvalHtml = '';
+  // if (Array.isArray(r.approvals) && r.approvals.length) {
+  //   approvalHtml = '<div>' +
+  //     '<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">承認状況</p>' +
+  //     '<div class="space-y-2">' +
+  //     r.approvals.map(function (a) {
+  //       var levelLabel = String(a.level) === '1' ? 'レビュアー' : 'マネージャー';
+  //       var decBadge = a.decision === 'approved' ? statusBadge('approved') :
+  //                      a.decision === 'rejected' ? statusBadge('rejected') :
+  //                      '<span class="text-xs text-slate-400">未確認</span>';
+  //       return '<div class="flex items-center justify-between bg-slate-50 rounded p-2">' +
+  //         '<span class="text-xs text-slate-600">' + levelLabel + '</span>' +
+  //         decBadge +
+  //       '</div>';
+  //     }).join('') +
+  //     '</div></div>';
+  // }
 
   sidebar.innerHTML =
     '<div class="p-8 border-b border-slate-100">' +
@@ -574,7 +575,7 @@ function openTaskReportDetail(r) {
         '<p class="text-xs text-slate-500">' + escapeHtml(r.employee_department) + '</p>' +
       '</div>' +
       '<div>' +
-        '<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">重要課題</p>' +
+        '<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">本日の作業報告</p>' +
         '<div class="bg-slate-50 rounded-lg p-3 border border-slate-100">' +
           '<p class="text-sm text-slate-800 whitespace-pre-wrap">' + escapeHtml(r.important_issues || '記載なし') + '</p>' +
         '</div>' +
@@ -586,16 +587,16 @@ function openTaskReportDetail(r) {
         '</div>' +
       '</div>' +
       redmineHtml +
-      approvalHtml +
       '<div>' +
         '<label class="text-xs font-medium text-slate-700 block mb-1">承認者コメント</label>' +
-        '<textarea id="approverComment" rows="3" placeholder="コメントを入力（任意）" ' +
+        '<textarea id="approverComment" rows="3" placeholder="コメントを入力（差戻しの場合は必須）" ' +
+          'oninput="this.classList.remove(\"border-red-400\",\"ring-1\",\"ring-red-400\")" ' +
           'class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm resize-none ' +
           'focus:outline-none focus:ring-2 focus:ring-blue-300"></textarea>' +
       '</div>' +
       '<div class="flex gap-2">' +
-        '<button onclick="doReject(\'' + r.id + '\')" ' +
-          'class="flex-1 h-10 border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">' +
+        '<button id="actionRejectBtn" onclick="doReject(\'' + r.id + '\')" ' +
+          'class="flex-1 h-10 border border-red-300 text-red-600 rounded-full text-sm font-medium hover:bg-red-50 transition-colors">' +
           '差戻し' +
         '</button>' +
         getApprovalButton(r) +
@@ -607,36 +608,48 @@ function openTaskReportDetail(r) {
 function doReview(reportId) {
   var comment = (document.getElementById('approverComment') || {}).value || '';
   var isTaskReport = selectedReport && selectedReport._type === 'task_report';
-  
+
+  var approveBtn = document.getElementById('actionApproveBtn');
+  var approveBtnOrig = approveBtn ? approveBtn.innerHTML : null;
+  if (approveBtn) {
+    approveBtn.disabled = true;
+    approveBtn.innerHTML = '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>照査中...</div>';
+  }
+
   if (isTaskReport) {
-    // Task report - single day review
     google.script.run
       .withSuccessHandler(function (r) {
-        if (r && r.error) { showActionMsg(r.error, false); return; }
+        if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
+        if (r && r.error) {
+          showActionMsg(r.error, false); return;
+        }
         showActionMsg('照査しました！', true);
-        reloadReports();
+        setTimeout(function() { reloadReports(); }, 500);
       })
-      .withFailureHandler(function () { showActionMsg('エラーが発生しました', false); })
+      .withFailureHandler(function () {
+        if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
+        showActionMsg('エラーが発生しました', false);
+      })
       .reviewTaskReportAction(reportId, comment);
   } else {
-    // Telework - review all days in the week
     if (!selectedReport || !selectedReport.tasks || !selectedReport.tasks.length) {
+      if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
       showActionMsg('申請日が見つかりません', false);
       return;
     }
-    
-    showActionMsg('照査処理中...', true);
     var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
     google.script.run
       .withSuccessHandler(function (r) {
+        if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
         if (r && r.error) {
           showActionMsg('エラー: ' + r.error, false);
           return;
         }
         showActionMsg('すべての日を照査しました！', true);
-        setTimeout(function() { reloadReports(); }, 1000);
+        setTimeout(function() { reloadReports(); }, 500);
       })
       .withFailureHandler(function () {
+        if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
         showActionMsg('エラーが発生しました', false);
       })
       .reviewWeekReport(dayIds, comment);
@@ -646,36 +659,48 @@ function doReview(reportId) {
 function doApprove(reportId) {
   var comment = (document.getElementById('approverComment') || {}).value || '';
   var isTaskReport = selectedReport && selectedReport._type === 'task_report';
-  
+
+  var approveBtn = document.getElementById('actionApproveBtn');
+  var approveBtnOrig = approveBtn ? approveBtn.innerHTML : null;
+  if (approveBtn) {
+    approveBtn.disabled = true;
+    approveBtn.innerHTML = '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>承認中...</div>';
+  }
+
   if (isTaskReport) {
-    // Task report - single day approval
     google.script.run
       .withSuccessHandler(function (r) {
-        if (r && r.error) { showActionMsg(r.error, false); return; }
+        if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
+        if (r && r.error) {
+          showActionMsg(r.error, false); return;
+        }
         showActionMsg('承認しました！', true);
-        reloadReports();
+        setTimeout(function() { reloadReports(); }, 500);
       })
-      .withFailureHandler(function () { showActionMsg('エラーが発生しました', false); })
+      .withFailureHandler(function () {
+        if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
+        showActionMsg('エラーが発生しました', false);
+      })
       .approveTaskReportAction(reportId, comment);
   } else {
-    // Telework - approve all days in the week
     if (!selectedReport || !selectedReport.tasks || !selectedReport.tasks.length) {
+      if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
       showActionMsg('申請日が見つかりません', false);
       return;
     }
-    
-    showActionMsg('承認処理中...', true);
     var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
     google.script.run
       .withSuccessHandler(function (r) {
+        if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
         if (r && r.error) {
           showActionMsg('エラー: ' + r.error, false);
           return;
         }
         showActionMsg('すべての日を承認しました！', true);
-        setTimeout(function() { reloadReports(); }, 1000);
+        setTimeout(function() { reloadReports(); }, 500);
       })
       .withFailureHandler(function () {
+        if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
         showActionMsg('エラーが発生しました', false);
       })
       .approveWeekReport(dayIds, comment);
@@ -683,38 +708,56 @@ function doApprove(reportId) {
 }
 
 function doReject(reportId) {
-  var comment = (document.getElementById('approverComment') || {}).value || '';
+  var comment = ((document.getElementById('approverComment') || {}).value || '').trim();
+  if (!comment) {
+    showActionMsg('差戻しにはコメントの入力が必須です', false);
+    var el = document.getElementById('approverComment');
+    if (el) { el.focus(); el.classList.add('border-red-400', 'ring-1', 'ring-red-400'); }
+    return;
+  }
   var isTaskReport = selectedReport && selectedReport._type === 'task_report';
-  
+
+  var rejectBtn = document.getElementById('actionRejectBtn');
+  var rejectBtnOrig = rejectBtn ? rejectBtn.innerHTML : null;
+  if (rejectBtn) {
+    rejectBtn.disabled = true;
+    rejectBtn.innerHTML = '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-red-300 border-t-red-600 rounded-full animate-spin"></div>差戻し中...</div>';
+  }
+
   if (isTaskReport) {
-    // Task report - single day rejection
     google.script.run
       .withSuccessHandler(function (r) {
-        if (r && r.error) { showActionMsg(r.error, false); return; }
+        if (rejectBtn && rejectBtnOrig) { rejectBtn.disabled = false; rejectBtn.innerHTML = rejectBtnOrig; }
+        if (r && r.error) {
+          showActionMsg(r.error, false); return;
+        }
         showActionMsg('差戻ししました', true);
-        reloadReports();
+        setTimeout(function() { reloadReports(); }, 500);
       })
-      .withFailureHandler(function () { showActionMsg('エラーが発生しました', false); })
+      .withFailureHandler(function () {
+        if (rejectBtn && rejectBtnOrig) { rejectBtn.disabled = false; rejectBtn.innerHTML = rejectBtnOrig; }
+        showActionMsg('エラーが発生しました', false);
+      })
       .rejectTaskReportAction(reportId, comment);
   } else {
-    // Telework - reject all days in the week
     if (!selectedReport || !selectedReport.tasks || !selectedReport.tasks.length) {
+      if (rejectBtn && rejectBtnOrig) { rejectBtn.disabled = false; rejectBtn.innerHTML = rejectBtnOrig; }
       showActionMsg('申請日が見つかりません', false);
       return;
     }
-    
-    showActionMsg('差戻し処理中...', true);
     var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
     google.script.run
       .withSuccessHandler(function (r) {
+        if (rejectBtn && rejectBtnOrig) { rejectBtn.disabled = false; rejectBtn.innerHTML = rejectBtnOrig; }
         if (r && r.error) {
           showActionMsg('エラー: ' + r.error, false);
           return;
         }
         showActionMsg('すべての日を差戻ししました', true);
-        setTimeout(function() { reloadReports(); }, 1000);
+        setTimeout(function() { reloadReports(); }, 500);
       })
       .withFailureHandler(function () {
+        if (rejectBtn && rejectBtnOrig) { rejectBtn.disabled = false; rejectBtn.innerHTML = rejectBtnOrig; }
         showActionMsg('エラーが発生しました', false);
       })
       .rejectWeekReport(dayIds, comment);

@@ -222,7 +222,7 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
     a.href = SCRIPT_URL + '?page=' + item.page;
     a.className = [
       'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
-      item.active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+      item.active ? 'bg-cyan-900 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
     ].join(' ');
     a.innerHTML =
       '<svg class="w-4 h-4 flex-shrink-0 ' + (item.active ? 'text-white' : item.color) + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +

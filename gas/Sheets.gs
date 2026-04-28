@@ -1,8 +1,9 @@
-// Export an array of plain objects to a NEW spreadsheet file in a specific Drive folder
-function adminExportToNewSpreadsheet(rows, sheetTitle) {
+// Export data with explicit headers to a NEW spreadsheet file in a specific Drive folder
+function adminExportToNewSpreadsheet(headers, dataRows, sheetTitle) {
   var user = getCurrentUser();
   if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
-  if (!rows || rows.length === 0) return { error: 'データがありません' };
+  if (!dataRows || dataRows.length === 0) return { error: 'データがありません' };
+  if (!headers || headers.length === 0) return { error: 'ヘッダーがありません' };
 
   // Folder ID for マミヤITソリューションズ/Exported (user provided)
   var folderId = '1Fbl8fcqqAXLIqWQ7UybXD8sGMU3elz6r';
@@ -15,7 +16,6 @@ function adminExportToNewSpreadsheet(rows, sheetTitle) {
   DriveApp.getRootFolder().removeFile(file); // Remove from My Drive root
 
   var sheet = ss.getActiveSheet();
-  var headers = Object.keys(rows[0]);
   sheet.clear();
   sheet.getRange(1, 1, 1, headers.length)
        .setValues([headers])
@@ -23,9 +23,6 @@ function adminExportToNewSpreadsheet(rows, sheetTitle) {
        .setBackground('#1e293b')
        .setFontColor('#ffffff');
 
-  var dataRows = rows.map(function (r) {
-    return headers.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
-  });
   if (dataRows.length > 0) {
     sheet.getRange(2, 1, dataRows.length, headers.length).setValues(dataRows);
   }

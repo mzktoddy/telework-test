@@ -4,11 +4,11 @@
 //  STEP 1: Set SPREADSHEET_ID to your Google Spreadsheet ID.
 //          (Create a blank sheet → copy the ID from the URL)
 // ============================================================
-
-var SPREADSHEET_ID = '1yJMqIrqETSMCObKWyMLcUzV7cjSTEDAKDajVZfQOdSY'; // ← Paste your Spreadsheet ID here
-var REDMINE_URL = 'https://pm.fs-revolution.info';
-var API_KEY = '5a50bf5242d0d4f2d9bcfa174b59fbffb9944ab2';
-const MATTERMOST_WEBHOOK_URL = "https://ch.fs-revolution.info/hooks/m14yxj45r3dzxr6hd13bnx4w5a";
+const scriptProperties = PropertiesService.getScriptProperties();
+const SPREADSHEET_ID = scriptProperties.getProperty('SPREADSHEET_ID');//
+const REDMINE_URL = scriptProperties.getProperty('REDMINE_URL');
+const API_KEY = scriptProperties.getProperty('API_KEY');//
+const MATTERMOST_WEBHOOK_URL = scriptProperties.getProperty('MATTERMOST_WEBHOOK_URL');//
 
 // ── Entry point ──────────────────────────────────────────────
 //
@@ -99,28 +99,28 @@ function include(filename) {
 }
 
 // ── Get image from Google Drive and convert to base64 ────────
-function getImageAsBase64(fileId) {
-  try {
-    // Get the file from Google Drive
-    var fileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; 
-    var file = DriveApp.getFileById(fileId);
+// function getImageAsBase64(fileId) {
+//   try {
+//     // Get the file from Google Drive
+//     var fileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; 
+//     var file = DriveApp.getFileById(fileId);
     
-    // Get the blob (file content)
-    var blob = file.getBlob();
+//     // Get the blob (file content)
+//     var blob = file.getBlob();
     
-    // Get the MIME type (e.g., image/png, image/jpeg)
-    var mimeType = blob.getContentType();
+//     // Get the MIME type (e.g., image/png, image/jpeg)
+//     var mimeType = blob.getContentType();
     
-    // Convert to base64
-    var base64Data = Utilities.base64Encode(blob.getBytes());
+//     // Convert to base64
+//     var base64Data = Utilities.base64Encode(blob.getBytes());
     
-    // Return as data URI
-    return 'data:' + mimeType + ';base64,' + base64Data;
-  } catch (error) {
-    Logger.log('Error getting image: ' + error.toString());
-    return null;
-  }
-}
+//     // Return as data URI
+//     return 'data:' + mimeType + ';base64,' + base64Data;
+//   } catch (error) {
+//     Logger.log('Error getting image: ' + error.toString());
+//     return null;
+//   }
+// }
 
 // ── Fetch open Redmine issues assigned to current user ────────
 // Strategy: Look up the Redmine user ID by the logged-in user's email,
@@ -323,14 +323,14 @@ function getRedmineTimeEntries(dateStr) {
   return result;
 }
 
-function main() {
-  const email = "k-kimura@mamiya-its.co.jp";  // ← change this
-  const issues = getOpenTicketsByEmail(email);
+// function main() {
+//   const email = "kaiden@mamiya-its.co.jp";  // ← change this
+//   const issues = getOpenTicketsByEmail(email);
 
-  issues.forEach(issue => {
-    Logger.log(`#${issue.id} | ${issue.subject} | ${issue.status.name} | ${issue.created_on}`);
-  });
-}
+//   issues.forEach(issue => {
+//     Logger.log(`#${issue.id} | ${issue.subject} | ${issue.status.name} | ${issue.created_on}`);
+//   });
+// }
 
 
 
@@ -356,7 +356,7 @@ function sendMattermostMessage(notificationData, channel) {
     var mattermostUsername = notificationData.employeeEmail ? 
                             notificationData.employeeEmail.split('@')[0].replace('.', '-') : 
                             'user';
-    var mattermostUsername　= 'myintzuko';
+    //var mattermostUsername　= 'myintzuko';
     
     // Determine status message
     var statusText = notificationData.decision === 'approved' ? '承認' : 
@@ -387,6 +387,7 @@ function sendMattermostMessage(notificationData, channel) {
     var payload = {
       text: message,
       // channel: channel || 'daily-report',
+      channel: 'pj_anpic_dev',
       username: '日報管理システム                              ',
       icon_emoji: ':mop:',
     };
@@ -426,7 +427,7 @@ function testMattermostNotification() {
     reportDate: '2026-03-27',
     weekTitle: '第14週',
     employeeName: 'ズーコ',
-    employeeEmail: 'ite001702@athuman.com',
+    employeeEmail: 'zuko@mamiya-its.co.jp',
     approverName: '海田',
     decision: 'approved',
     reportUrl: ScriptApp.getService().getUrl() + '?page=reports',
@@ -446,7 +447,7 @@ function testMattermostNotification() {
     reportType: 'task',
     reportDate: '2026-03-27',
     employeeName: 'ズーコ',
-    employeeEmail: 'ite001702@athuman.com',
+    employeeEmail: 'zuko@mamiya-its.co.jp',
     approverName: '海田',
     decision: 'approved',
     reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
@@ -480,23 +481,6 @@ function getUserList() {
   });
 }
 
-function getChannelById() {
-  channelId = '79s78jijg3yjxcdsxt9q33shha'
-  const url = `${MATTERMOST_WEBHOOK_URL}/api/v4/channels/${channelId}`;
-
-  const options = {
-    method: "GET",
-    muteHttpExceptions: true
-  };
-
-  try {
-    const response = UrlFetchApp.fetch(url, options);
-    const data = JSON.parse(response.getContentText());
-    return JSON.parse(response.getContentText());
-  } catch(e) {
-    return null;
-  }
-}
 
 // ── Tokyo weather forecast via Open-Meteo ────────────────────
 // Returns 7 days starting from today (Japan time).
@@ -591,6 +575,7 @@ function sendDailyPendingNotifications() {
   function notify(user, header, rows) {
     if (!rows.length) return;
     var mention = getMention(user);
+    //var mention = "myintzuko"
 
     // Markdown table
     var table = '| 書類 | 件数 |\n| :--- | ---: |\n';
@@ -607,9 +592,9 @@ function sendDailyPendingNotifications() {
         contentType:      'application/json',
         payload:          JSON.stringify({
           text:        text,
-          channel:     'daily-report',
+          channel:     'pj_anpic_dev',
           username:    '日報管理システム',
-          icon_emoji:  ':bell:',
+          icon_emoji:  ':mop:',
         }),
         muteHttpExceptions: true,
       });
@@ -650,10 +635,10 @@ function sendDailyPendingNotifications() {
       if (!empIds.length) return;
 
       var pendingTelework = allReports.filter(function(r) {
-        return r.status === 'reviewer_approved' && empIds.indexOf(r.employee_id) >= 0;
+        return r.status === 'reviewed' && empIds.indexOf(r.employee_id) >= 0;
       });
       var pendingTask = allTaskReports.filter(function(r) {
-        return r.status === 'reviewer_approved' && empIds.indexOf(r.employee_id) >= 0;
+        return r.status === 'reviewed' && empIds.indexOf(r.employee_id) >= 0;
       });
 
       var rows = [];
@@ -671,18 +656,28 @@ function sendDailyPendingNotifications() {
 // inside sendDailyPendingNotifications().
 function setupDailyTrigger() {
   // Remove any existing trigger to avoid duplicates
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'sendDailyPendingNotifications') {
-      ScriptApp.deleteTrigger(t);
-    }
+  const days = [
+    ScriptApp.WeekDay.MONDAY,
+    ScriptApp.WeekDay.TUESDAY,
+    ScriptApp.WeekDay.WEDNESDAY,
+    ScriptApp.WeekDay.THURSDAY,
+    ScriptApp.WeekDay.FRIDAY
+  ];
+  
+  days.forEach(day => {
+    ScriptApp.newTrigger("sendDailyPendingNotifications") // Name of function to run
+      .timeBased()
+      .onWeekDay(day)
+      .atHour(15) // Set hour (0-23)
+      .inTimezone('Asia/Tokyo')
+      .create();
   });
-
-  ScriptApp.newTrigger('sendDailyPendingNotifications')
-    .timeBased()
-    .everyDays(1)
-    .atHour(9)          // 9 AM in the project timezone
-    .inTimezone('Asia/Tokyo')
-    .create();
+  // ScriptApp.newTrigger('sendDailyPendingNotifications')
+  //   .timeBased()
+  //   .everyDays(1)
+  //   .atHour(9)          // 9 AM in the project timezone
+  //   .inTimezone('Asia/Tokyo')
+  //   .create();
 
   Logger.log('✅ Daily trigger installed: 9 AM JST weekdays');
   return '✅ Trigger installed';

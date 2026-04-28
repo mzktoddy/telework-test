@@ -71,21 +71,21 @@
       <p class="text-sm text-slate-500">全従業員の「申請履歴」と「日報報告」の管理が行えます。</p>
     </div>
     <div class="flex gap-3">
-      <button onclick="bulkDelete()"
-        class="flex items-center gap-2 h-10 px-5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors">
+      <button onclick="bulkDelete()" 
+        class="flex items-center gap-2 h-10 px-5 bg-red-900 hover:bg-red-800 text-white text-sm font-medium rounded-lg transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
         </svg>
-        表示中の一括削除
+        一括削除
       </button>
       <button onclick="exportToSheet()"
-        class="flex items-center gap-2 h-10 px-5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
+        class="flex items-center gap-2 h-10 px-5 bg-green-800 hover:bg-green-900 text-white text-sm font-medium rounded-lg transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
         </svg>
-        スプレッドシートへ書き込み
+        スプレッドシート出力
       </button>
     </div>
   </div>
@@ -118,6 +118,13 @@
              focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-700">
       <option value="">全期間</option>
     </select>
+    <button onclick="clearFilters()"
+      class="h-9 px-4 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2 whitespace-nowrap">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+      フィルタクリア
+    </button>
   </div>
 
   <!-- States: loading / empty / table -->
@@ -209,7 +216,7 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
     a.href = SCRIPT_URL + '?page=' + item.page;
     a.className = [
       'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
-      item.active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+      item.active ? 'bg-cyan-900 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
     ].join(' ');
     a.innerHTML =
       '<svg class="w-4 h-4 flex-shrink-0 ' + (item.active ? 'text-white' : item.color) + '" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
@@ -241,6 +248,7 @@ var _taskData     = [];
 var _filteredRows = [];
 var _teleLoaded   = false;
 var _taskLoaded   = false;
+var _exportLink   = null;
 
 // ── Utilities ─────────────────────────────────────────────────
 function escHtml(s) {
@@ -377,6 +385,7 @@ function switchTab(tab) {
   document.getElementById('tabTelework').className = tab === 'telework' ? activeClass : inactiveClass;
   document.getElementById('tabTask').className     = tab === 'task'     ? activeClass : inactiveClass;
   document.getElementById('searchName').value = '';
+  clearExportLink();
   buildWeekOptions();
   applyFilters();
 }
@@ -435,6 +444,22 @@ function applyFilters() {
   });
 
   renderTable();
+}
+
+// ── Clear filters ─────────────────────────────────────────────
+function clearFilters() {
+  document.getElementById('searchName').value = '';
+  document.getElementById('weekFilter').value = '';
+  clearExportLink();
+  applyFilters();
+}
+
+// ── Clear export link ─────────────────────────────────────────
+function clearExportLink() {
+  if (_exportLink && _exportLink.parentNode) {
+    _exportLink.parentNode.removeChild(_exportLink);
+    _exportLink = null;
+  }
 }
 
 // ── Render table ──────────────────────────────────────────────
@@ -586,35 +611,37 @@ function exportToSheet() {
     ('0' + now.getHours()).slice(-2) +
     ('0' + now.getMinutes()).slice(-2);
 
-  var title, rows;
+  var title, headers, dataRows;
   if (_activeTab === 'telework') {
     title = '在宅勤務申請_' + stamp;
-    rows = _filteredRows.map(function (r) {
-      return {
-        従業員名:   r.employee_name,
-        部署:       r.department,
-        対象日:     r.request_date,
-        曜日:       r.day_short,
-        週:         r.week_title,
-        勤務種別:   r.work_type,
-        内容:       r.notes,
-        ステータス: statusLabel(r.status),
-        作成日時:   r.created_at,
-      };
+    headers = ['週', '従業員名', '部署', '勤務種別', '対象日', '曜日', 'ステータス', '作業予定内容', '作成日時'];
+    dataRows = _filteredRows.map(function (r) {
+      return [
+        r.week_title,
+        r.employee_name,
+        r.department,
+        r.work_type,
+        r.request_date,
+        r.day_short,
+        statusLabel(r.status),
+        r.notes,
+        r.created_at
+      ];
     });
   } else {
     title = '日報報告_' + stamp;
-    rows = _filteredRows.map(function (r) {
-      return {
-        従業員名:   r.employee_name,
-        部署:       r.department,
-        対象日:     r.report_date,
-        曜日:       r.day_short,
-        重要事項:   r.important_issues,
-        翌日の計画: r.next_day_plan,
-        ステータス: statusLabel(r.status),
-        作成日時:   r.created_at,
-      };
+    headers = ['従業員名', '部署', '対象日', '曜日', 'ステータス', '作業報告', '翌日の計画', '作成日時'];
+    dataRows = _filteredRows.map(function (r) {
+      return [
+        r.employee_name,
+        r.department,
+        r.report_date,
+        r.day_short,
+        statusLabel(r.status),
+        r.important_issues,
+        r.next_day_plan,
+        r.created_at
+      ];
     });
   }
 
@@ -623,14 +650,18 @@ function exportToSheet() {
     .withSuccessHandler(function (res) {
       document.getElementById('pageLoader').classList.add('hidden');
       if (res && res.success) {
-        showToast('スプレッドシート「' + (res.fileName || title) + '」に ' + rows.length + '件書き込みました');
+        showToast('スプレッドシート「' + (res.fileName || title) + '」に ' + dataRows.length + '件書き込みました');
         if (res.url) {
-          const a = document.createElement('a');
-          a.href = res.url;
-          a.target = '_blank';
-          a.textContent = '→ スプレッドシートを開く';
-          a.className = 'ml-2 text-blue-600 underline';
-          document.body.appendChild(a);
+          clearExportLink();
+          var linkText = _activeTab === 'telework' 
+            ? '→ 在宅勤務申請スプレッドシートを開く' 
+            : '→ 日報報告スプレッドシートを開く';
+          _exportLink = document.createElement('a');
+          _exportLink.href = res.url;
+          _exportLink.target = '_blank';
+          _exportLink.textContent = linkText;
+          _exportLink.className = 'ml-2 text-blue-600 underline';
+          document.body.appendChild(_exportLink);
         }
       } else {
         showToast((res && res.error) ? res.error : 'エクスポートに失敗しました', true);
@@ -640,7 +671,7 @@ function exportToSheet() {
       document.getElementById('pageLoader').classList.add('hidden');
       showToast('エラー: ' + ((err && err.message) || '不明'), true);
     })
-    .adminExportToNewSpreadsheet(rows, title);
+    .adminExportToNewSpreadsheet(headers, dataRows, title);
 }
 
 // ── Redmine official logo SVG (inline) ───────────────────────
@@ -749,7 +780,7 @@ function openDetail(id, type) {
         '<div class="col-span-2 space-y-4">' +
           '<p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">本日の業務内容</p>' +
           '<div class="border-l-4 border-red-400 pl-3 py-0.5">' +
-            '<p class="text-xs font-bold text-slate-700 mb-1">■ 重要課題</p>' +
+            '<p class="text-xs font-bold text-slate-700 mb-1">■ 作業報告</p>' +
             '<p class="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">' +
               escHtml(d.important_issues || '特になし') +
             '</p>' +

@@ -155,7 +155,7 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
     a.className = [
       'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
       item.active
-        ? 'bg-blue-600 text-white'
+        ? 'bg-cyan-900 text-white'
         : 'text-slate-300 hover:bg-slate-800 hover:text-white',
     ].join(' ');
     a.innerHTML =
@@ -344,8 +344,8 @@ function makeDayCard(d, dayShort, idx) {
   // Add delete button for draft or rejected status
   var deleteBtn = '';
   if (dayStatus === 'draft' || dayStatus === 'rejected') {
-    deleteBtn = '<button onclick="event.stopPropagation(); deleteTaskDay(' + idx + ', \'' + isoDate(d) + '\');" ' +
-      'class="ml-2 p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors" ' +
+    deleteBtn = '<button id="deleteTaskDayBtn_' + idx + '" onclick="event.stopPropagation(); deleteTaskDay(' + idx + ', \'' + isoDate(d) + '\');" ' +
+      'class="ml-2 p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0" ' +
       'title="この日の日報を削除">' +
       '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
         '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" ' +
@@ -422,9 +422,9 @@ function openDetailPanel(d, dayShort, idx) {
       '</button>' +
       '<div id="redmineList_' + idx + '" class="mt-3 space-y-2"></div>' +
     '</div>' +
-    // 重要課題
+    // 本日の作業報告
     '<div class="mb-4">' +
-      '<label class="text-xs font-medium text-slate-700 block mb-1">重要課題</label>' +
+      '<label class="text-xs font-medium text-slate-700 block mb-1">本日の作業報告</label>' +
       '<textarea id="importantIssues_' + idx + '" rows="4" ' +
         'placeholder="本日の重要な課題や成果を記入してください..." ' +
         'class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-300">' +
@@ -443,7 +443,7 @@ function openDetailPanel(d, dayShort, idx) {
     // Action buttons — individual day submit
     '<div class="space-y-3">' +
       '<div class="flex gap-3">' +
-        '<button onclick="saveTaskDay(' + idx + ')" ' +
+        '<button id="saveBtn_' + idx + '" onclick="saveTaskDay(' + idx + ')" ' +
           'class="flex-1 h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors">' +
           '保存' +
         '</button>' +
@@ -452,7 +452,7 @@ function openDetailPanel(d, dayShort, idx) {
           'キャンセル' +
         '</button>' +
       '</div>' +
-      '<button onclick="submitTaskDay(' + idx + ')" ' +
+      '<button id="submitTaskDayBtn_' + idx + '" onclick="submitTaskDay(' + idx + ')" ' +
         'class="w-full h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors flex items-center justify-center gap-2">' +
         '申請' +
         '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
@@ -569,6 +569,19 @@ function saveTaskDay(idx) {
   var np = document.getElementById('nextDayPlan_' + idx);
   if (!ii || !np) return;
 
+  var importantIssuesVal = ii.value.trim();
+  var nextPlanVal        = np.value.trim();
+  var hasRedmine         = dayData[idx].redmineTasks && dayData[idx].redmineTasks.length > 0;
+
+  if (!nextPlanVal) {
+    showDayMsg(idx, '翌営業日の作業予定を入力してください', false);
+    np.focus(); return;
+  }
+  if (!importantIssuesVal && !hasRedmine) {
+    showDayMsg(idx, '本日の作業報告またはRedmine作業実績を入力してください', false);
+    ii.focus(); return;
+  }
+
   dayData[idx].importantIssues = ii.value;
   dayData[idx].nextDayPlan     = np.value;
   dayData[idx].edited          = true;
@@ -588,17 +601,17 @@ function saveTaskDay(idx) {
 
   renderWeek();
   openDetailPanel(date, DAY_SHORTS[idx], idx);
-  showDayMsg(idx, '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-green-600/30 border-t-green-600 rounded-full animate-spin"></div>保存中...</div>', true);
-  
-  // Disable save button during save
-  var saveBtn = document.querySelector('button[onclick="saveTaskDay(' + idx + ')"]');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.classList.add('opacity-50', 'cursor-not-allowed'); }
+  var saveBtn = document.getElementById('saveBtn_' + idx);
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>保存中...</div>';
+  }
 
   google.script.run
-    .withSuccessHandler(function (r) {      // Re-enable save button
-      var saveBtn = document.querySelector('button[onclick="saveTaskDay(' + idx + ')"]');
-      if (saveBtn) { saveBtn.disabled = false; saveBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-            if (r && r.error) {
+    .withSuccessHandler(function (r) {
+      var saveBtn = document.getElementById('saveBtn_' + idx);
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '保存'; }
+      if (r && r.error) {
         dayData[idx].savedStatus = null;
         dayData[idx].edited = false;
         renderWeek();
@@ -618,10 +631,8 @@ function saveTaskDay(idx) {
         .getMyTaskReports();
     })
     .withFailureHandler(function () {
-      // Re-enable save button
-      var saveBtn = document.querySelector('button[onclick="saveTaskDay(' + idx + ')"]');
-      if (saveBtn) { saveBtn.disabled = false; saveBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-      
+      var saveBtn = document.getElementById('saveBtn_' + idx);
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '保存'; }
       dayData[idx].savedStatus = null;
       dayData[idx].edited = false;
       renderWeek();
@@ -639,6 +650,38 @@ function submitTaskDay(idx) {
   var offset = parseInt(weekSel.value) || 0;
   var sun    = getSundayOfWeek(offset);
   var date   = new Date(sun); date.setDate(sun.getDate() + idx);
+
+  // Validation for unsaved / draft / rejected states
+  if (ii && np) {
+    var nextPlanVal        = np.value.trim();
+    var importantIssuesVal = ii.value.trim();
+    var hasRedmine         = dayData[idx].redmineTasks && dayData[idx].redmineTasks.length > 0;
+    if (!nextPlanVal) {
+      showDayMsg(idx, '翌営業日の作業予定を入力してください', false);
+      np.focus(); return;
+    }
+    if (!importantIssuesVal && !hasRedmine) {
+      showDayMsg(idx, '本日の作業報告またはRedmine作業実績を入力してください', false);
+      ii.focus(); return;
+    }
+  }
+
+  // Spinner helpers
+  function _setSubmitSpinner(label) {
+    var btn = document.getElementById('submitTaskDayBtn_' + idx);
+    if (!btn) return;
+    btn.disabled = true;
+    btn.innerHTML = '<div class="flex items-center justify-center gap-2">' +
+      '<div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>' +
+      label + '</div>';
+  }
+  function _restoreSubmitBtn() {
+    var btn = document.getElementById('submitTaskDayBtn_' + idx);
+    if (!btn) return;
+    btn.disabled = false;
+    btn.innerHTML = '申請<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+      '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>';
+  }
 
   // If not yet saved, save as draft first then submit
   if (!dayData[idx].savedStatus || dayData[idx].savedStatus === 'none') {
@@ -658,33 +701,22 @@ function submitTaskDay(idx) {
 
     renderWeek();
     openDetailPanel(date, DAY_SHORTS[idx], idx);
-    showDayMsg(idx, '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-green-600/30 border-t-green-600 rounded-full animate-spin"></div>保存して申請中...</div>', true);
-    
-    // Disable submit button
-    var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('opacity-50', 'cursor-not-allowed'); }
+    _setSubmitSpinner('保存して申請中...');
 
     google.script.run
       .withSuccessHandler(function (r) {
-        // Re-enable submit button
-        var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-        
         if (r && r.error) {
+          _restoreSubmitBtn();
           dayData[idx].savedStatus = null;
           renderWeek();
           openDetailPanel(date, DAY_SHORTS[idx], idx);
           showDayMsg(idx, r.error, false);
           return;
         }
-        // Now submit
         _doSubmit(idx, date);
       })
       .withFailureHandler(function () {
-        // Re-enable submit button
-        var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-        
+        _restoreSubmitBtn();
         dayData[idx].savedStatus = null;
         renderWeek();
         openDetailPanel(date, DAY_SHORTS[idx], idx);
@@ -694,8 +726,7 @@ function submitTaskDay(idx) {
     return;
   }
 
-  if (dayData[idx].savedStatus === 'draft') {
-    // Save latest edits first
+  if (dayData[idx].savedStatus === 'draft' || dayData[idx].savedStatus === 'rejected') {
     if (ii && np) {
       dayData[idx].importantIssues = ii.value;
       dayData[idx].nextDayPlan     = np.value;
@@ -709,26 +740,15 @@ function submitTaskDay(idx) {
     };
     renderWeek();
     openDetailPanel(date, DAY_SHORTS[idx], idx);
-    showDayMsg(idx, '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-green-600/30 border-t-green-600 rounded-full animate-spin"></div>申請中...</div>', true);
-    
-    // Disable submit button
-    var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('opacity-50', 'cursor-not-allowed'); }
+    _setSubmitSpinner('申請中...');
 
     google.script.run
       .withSuccessHandler(function (r) {
-        // Re-enable submit button
-        var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-        
-        if (r && r.error) { showDayMsg(idx, r.error, false); return; }
+        if (r && r.error) { _restoreSubmitBtn(); showDayMsg(idx, r.error, false); return; }
         _doSubmit(idx, date);
       })
       .withFailureHandler(function () {
-        // Re-enable submit button
-        var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-        
+        _restoreSubmitBtn();
         showDayMsg(idx, '保存に失敗しました', false);
       })
       .saveTaskReportDraft(updatePayload);
@@ -743,17 +763,23 @@ function _doSubmit(idx, date) {
   dayData[idx].savedStatus = 'submitted';
   renderWeek();
   openDetailPanel(date, DAY_SHORTS[idx], idx);
-  
-  // Disable submit button during submission
-  var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
-  if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('opacity-50', 'cursor-not-allowed'); }
+
+  var submitBtn = document.getElementById('submitTaskDayBtn_' + idx);
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<div class="flex items-center justify-center gap-2">' +
+      '<div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>' +
+      '申請中...</div>';
+  }
 
   google.script.run
     .withSuccessHandler(function (r) {
-      // Re-enable submit button
-      var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-      
+      var submitBtn = document.getElementById('submitTaskDayBtn_' + idx);
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '申請<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>';
+      }
       if (r && r.error) {
         dayData[idx].savedStatus = 'draft';
         renderWeek();
@@ -773,10 +799,12 @@ function _doSubmit(idx, date) {
         .getMyTaskReports();
     })
     .withFailureHandler(function () {
-      // Re-enable submit button
-      var submitBtn = document.querySelector('button[onclick="submitTaskDay(' + idx + ')"]');
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-      
+      var submitBtn = document.getElementById('submitTaskDayBtn_' + idx);
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '申請<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>';
+      }
       dayData[idx].savedStatus = 'draft';
       renderWeek();
       openDetailPanel(date, DAY_SHORTS[idx], idx);
@@ -798,44 +826,51 @@ function deleteTaskDay(idx, dateStr) {
   if (!confirm('この日の日報を削除してもよろしいですか？\n\n日付: ' + dateStr + '\n\nこの操作は取り消せません。')) {
     return;
   }
-  
-  // Close detail panel if this day is selected
-  if (selectedDayIdx === idx) {
-    selectedDayIdx = null;
-    document.getElementById('detailDateLabel').textContent = '日を選択してください';
-    document.getElementById('detailPanel').innerHTML =
-      '<p class="text-sm text-slate-400">削除中...</p>';
+
+  // Swap delete button to spinner
+  var _delBtn = document.getElementById('deleteTaskDayBtn_' + idx);
+  var _delBtnOrig = _delBtn ? _delBtn.innerHTML : null;
+  if (_delBtn) {
+    _delBtn.disabled = true;
+    _delBtn.innerHTML = '<div class="w-4 h-4 border-2 border-red-300 border-t-red-600 rounded-full animate-spin"></div>';
   }
-  
+
+  // Show spinner in detail panel
+  selectedDayIdx = null;
+  document.getElementById('detailDateLabel').textContent = '日を選択してください';
+  document.getElementById('detailPanel').innerHTML =
+    '<div class="flex flex-col items-center justify-center gap-3 py-16">' +
+      '<div class="w-8 h-8 border-4 border-slate-200 border-t-slate-700 rounded-full animate-spin"></div>' +
+      '<p class="text-sm text-slate-500">削除中...</p>' +
+    '</div>';
+
   google.script.run
     .withSuccessHandler(function (r) {
       if (r && r.error) {
+        if (_delBtn && _delBtnOrig) { _delBtn.innerHTML = _delBtnOrig; _delBtn.disabled = false; }
+        document.getElementById('detailPanel').innerHTML =
+          '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
         alert('削除エラー: ' + r.error);
         return;
       }
-      
-      // Clear local state for this day
       dayData[idx] = { importantIssues: '', nextDayPlan: '', redmineTasks: [], approvals: [], edited: false, savedStatus: null };
-      
-      // Reload data from server
+      document.getElementById('detailPanel').innerHTML =
+        '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
       google.script.run
         .withSuccessHandler(function (data) {
           if (data && !data.error) {
             myTaskReports = data;
-            dayData = makeFreshDayData(); // Reset all days
+            dayData = makeFreshDayData();
             renderWeek();
-            document.getElementById('detailPanel').innerHTML =
-              '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
           }
         })
         .getMyTaskReports();
     })
     .withFailureHandler(function (err) {
+      if (_delBtn && _delBtnOrig) { _delBtn.innerHTML = _delBtnOrig; _delBtn.disabled = false; }
+      document.getElementById('detailPanel').innerHTML =
+        '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
       alert('削除に失敗しました: ' + (err && err.message ? err.message : '不明なエラー'));
-      if (selectedDayIdx === idx) {
-        document.getElementById('detailPanel').innerHTML =
-          '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
-      }
     })
     .deleteTaskDay(dateStr);
 }
@@ -847,7 +882,7 @@ function showDayMsg(idx, msg, ok) {
   el.className = 'mt-3 text-sm text-center p-2 rounded-md ' +
     (ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
   el.classList.remove('hidden');
-  setTimeout(function () { el.classList.add('hidden'); }, 2500);
+  if (ok) { setTimeout(function () { el.classList.add('hidden'); }, 2500); }
 }
 
 // ── Logout ────────────────────────────────────────────────────

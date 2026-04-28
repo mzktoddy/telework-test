@@ -145,7 +145,7 @@ var _gasEl     = document.getElementById('gasVars');
 var APP_USER   = JSON.parse(_gasEl.getAttribute('data-user') || 'null');
 var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
 
-var DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+var DAY_LABELS = ['月', '火', '水', '木', '金'];
 
 // Set dashboard title based on user role
 if (APP_USER) {
@@ -204,7 +204,7 @@ if (APP_USER) {
     a.className = [
       'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
       item.active
-        ? 'bg-blue-600 text-white'
+        ? 'bg-cyan-900 text-white'
         : 'text-slate-300 hover:bg-slate-800 hover:text-white',
     ].join(' ');
     a.innerHTML =

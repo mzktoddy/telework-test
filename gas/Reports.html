@@ -137,7 +137,7 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
       icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>',
     },
     {
-      label: '在宅勤務許可申請',
+      label: '在宅勤務許可申請',active: true,
       page:  'reports',
       color: 'text-emerald-400',
       icon:  '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
@@ -175,10 +175,11 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
   items.forEach(function (item) {
     var a = document.createElement('a');
     a.href = SCRIPT_URL + '?page=' + item.page;
+    debugger;
     a.className = [
       'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium',
       item.active
-        ? 'bg-blue-600 text-white'
+        ? 'bg-cyan-900 text-white'
         : 'text-slate-300 hover:bg-slate-800 hover:text-white',
     ].join(' ');
     a.innerHTML =
@@ -262,7 +263,8 @@ var availableTasks = {}; // Store fetched Redmine tasks by day index
 
 function makeFreshDayData() {
   return [0,1,2,3,4,5,6].map(function () {
-    return { workType: '在宅勤務', notes: '', redmineTasks: [], edited: false, savedStatus: null };
+    return { workType: '在宅勤務', notes: '', redmineTasks: [], edited: false, savedStatus: null,
+             _origNotes: null, _origWorkType: null, _origRedmineIds: null };
   });
 }
 
@@ -332,6 +334,11 @@ function renderWeek() {
         tempData[dayIndex].redmineTasks = dayTask.redmineTasks || [];
         tempData[dayIndex].edited       = true; // saved to sheet
         tempData[dayIndex].savedStatus  = dayTask.status; // remember saved status
+        if (dayTask.status === 'rejected') {
+          tempData[dayIndex]._origNotes      = dayTask.notes || '';
+          tempData[dayIndex]._origWorkType   = dayTask.workType || '在宅勤務';
+          tempData[dayIndex]._origRedmineIds = (dayTask.redmineTasks || []).map(function (t) { return String(t.id); }).sort().join(',');
+        }
       }
     });
   }
@@ -419,13 +426,13 @@ function makeDayCard(d, dayShort, status, idx, weekReport) {
   // Add delete button for draft or rejected status
   var deleteBtn = '';
   if (dayStatus === 'draft' || dayStatus === 'rejected') {
-    deleteBtn = '<button onclick="event.stopPropagation(); deleteDay(' + idx + ', \'' + isoDate(d) + '\');" ' +
-      'class="ml-2 p-1.5 text-red-800 hover:bg-red-100 rounded-lg transition-colors" ' +
+    deleteBtn = '<button id="deleteDayBtn_' + idx + '" onclick="event.stopPropagation(); deleteDay(' + idx + ', \'' + isoDate(d) + '\');" ' +
+      'class="ml-2 p-1.5 text-red-800 hover:bg-red-100 rounded-lg transition-colors flex-shrink-0" ' +
       'title="この日の申請を削除">' +
       '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
         '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" ' +
           'd="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>' +
-      '</svg>' +   
+      '</svg>' +
     '</button>';
   }
   
@@ -468,11 +475,17 @@ function openDetailPanel(d, dayShort, idx, weekReport) {
     '</div>';
   }
   
-  // Show rejection reason only for this specific day if it's rejected
+  // Show rejection reason for this specific day if it's rejected
   var data = dayData[idx];
   var rejectionHtml = '';
-  if (data.savedStatus === 'rejected' && weekReport && weekReport.tasks && weekReport.tasks[idx]) {
-    var currentDayTask = weekReport.tasks[idx];
+  var _dayIsoStr = isoDate(d);
+  var currentDayTask = null;
+  if (weekReport && weekReport.tasks) {
+    for (var _ti = 0; _ti < weekReport.tasks.length; _ti++) {
+      if (weekReport.tasks[_ti].date === _dayIsoStr) { currentDayTask = weekReport.tasks[_ti]; break; }
+    }
+  }
+  if (data.savedStatus === 'rejected' && currentDayTask) {
     if (currentDayTask.approvals && currentDayTask.approvals.length > 0) {
       var rejectedApprovals = currentDayTask.approvals.filter(function (a) { return a.decision === 'rejected'; });
       
@@ -669,6 +682,14 @@ function saveDay(idx) {
   var nt = document.getElementById('notes_' + idx);
   if (!wt || !nt) return;
 
+  // Validate: at least one of notes or Redmine tasks must be filled
+  var notesValue = nt.value.trim();
+  var hasRedmine = dayData[idx].redmineTasks && dayData[idx].redmineTasks.length > 0;
+  if (!notesValue && !hasRedmine) {
+    showDayMsg(idx, '業務内容・タスクまたはRedmineタスクを入力してください', false);
+    nt.focus();
+    return;
+  }
   // Update local state first
   dayData[idx].workType = wt.value;
   dayData[idx].notes    = nt.value;
@@ -758,54 +779,60 @@ function deleteDay(idx, dateStr) {
   if (!confirm('この日の申請を削除してもよろしいですか？\n\n日付: ' + dateStr + '\n\nこの操作は取り消せません。')) {
     return;
   }
-  
+
+  // Swap delete button to spinner
+  var _delBtn = document.getElementById('deleteDayBtn_' + idx);
+  var _delBtnOrig = _delBtn ? _delBtn.innerHTML : null;
+  if (_delBtn) {
+    _delBtn.disabled = true;
+    _delBtn.innerHTML = '<div class="w-5 h-5 border-2 border-red-300 border-t-red-700 rounded-full animate-spin"></div>';
+  }
+
+  // Show spinner in detail panel
+  selectedDayIdx = null;
+  document.getElementById('detailDateLabel').textContent = '日を選択してください';
+  document.getElementById('detailPanel').innerHTML =
+    '<div class="flex flex-col items-center justify-center gap-3 py-16">' +
+      '<div class="w-8 h-8 border-4 border-slate-200 border-t-slate-700 rounded-full animate-spin"></div>' +
+      '<p class="text-sm text-slate-500">削除中...</p>' +
+    '</div>';
+
   var offset = parseInt(weekSel.value) || 0;
   var sun    = getSundayOfWeek(offset);
   var sat    = new Date(sun); sat.setDate(sun.getDate() + 6);
-  
   var payload = {
     startDate: isoDate(sun),
     endDate:   isoDate(sat),
     date:      dateStr,
   };
-  
-  // Close detail panel if this day is selected
-  if (selectedDayIdx === idx) {
-    selectedDayIdx = null;
-    document.getElementById('detailDateLabel').textContent = '日を選択してください';
-    document.getElementById('detailPanel').innerHTML =
-      '<p class="text-sm text-slate-400">削除中...</p>';
-  }
-  
+
   google.script.run
     .withSuccessHandler(function (r) {
       if (r && r.error) {
+        if (_delBtn && _delBtnOrig) { _delBtn.innerHTML = _delBtnOrig; _delBtn.disabled = false; }
+        document.getElementById('detailPanel').innerHTML =
+          '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
         alert('削除エラー: ' + r.error);
         return;
       }
-      
-      // Clear local state for this day
       dayData[idx] = { workType: '在宅勤務', notes: '', redmineTasks: [], edited: false, savedStatus: null };
-      
-      // Reload data from server
+      document.getElementById('detailPanel').innerHTML =
+        '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
       google.script.run
         .withSuccessHandler(function (data) {
           if (data && !data.error) {
             myReports = data;
-            dayData = makeFreshDayData(); // Reset all days
+            dayData = makeFreshDayData();
             renderWeek();
-            document.getElementById('detailPanel').innerHTML =
-              '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
           }
         })
         .getMyReports();
     })
     .withFailureHandler(function (err) {
+      if (_delBtn && _delBtnOrig) { _delBtn.innerHTML = _delBtnOrig; _delBtn.disabled = false; }
+      document.getElementById('detailPanel').innerHTML =
+        '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
       alert('削除に失敗しました: ' + (err && err.message ? err.message : '不明なエラー'));
-      if (selectedDayIdx === idx) {
-        document.getElementById('detailPanel').innerHTML =
-          '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
-      }
     })
     .deleteTeleworkDay(payload);
 }
@@ -817,7 +844,8 @@ function showDayMsg(idx, msg, ok) {
   el.className   = 'mt-3 text-sm text-center p-2 rounded-md ' +
     (ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
   el.classList.remove('hidden');
-  setTimeout(function () { el.classList.add('hidden'); }, 2500);
+  // Success messages auto-hide; error messages stay until the next action
+  if (ok) { setTimeout(function () { el.classList.add('hidden'); }, 2500); }
 }
 
 // ── Helper to find current week's report from myReports ───────
@@ -918,6 +946,33 @@ function submitWeek() {
     return;
   }
 
+  // Validate content of all days to be submitted
+  var _emptyDates = [];
+  var _unchangedRejectedDates = [];
+  for (var _v = 0; _v < 7; _v++) {
+    var _vd = dayData[_v];
+    if (!_vd.edited || (_vd.savedStatus !== 'draft' && _vd.savedStatus !== 'rejected')) continue;
+    var _vdate = new Date(sun); _vdate.setDate(sun.getDate() + _v);
+    var _vHasRedmine = _vd.redmineTasks && _vd.redmineTasks.length > 0;
+    if ((!_vd.notes || !_vd.notes.trim()) && !_vHasRedmine) {
+      _emptyDates.push(fmtDate(_vdate));
+    }
+    if (_vd.savedStatus === 'rejected' && _vd._origNotes !== null) {
+      var _vIds = (_vd.redmineTasks || []).map(function (t) { return String(t.id); }).sort().join(',');
+      if (_vd.notes.trim() === (_vd._origNotes || '').trim() && _vd.workType === _vd._origWorkType && _vIds === _vd._origRedmineIds) {
+        _unchangedRejectedDates.push(fmtDate(_vdate));
+      }
+    }
+  }
+  if (_emptyDates.length > 0) {
+    alert('以下の日付は業務内容・タスクとRedmineタスクがどちらも未入力です。\n先に各日の「保存」ボタンで入力してください。\n\n' + _emptyDates.join('\n'));
+    return;
+  }
+  if (_unchangedRejectedDates.length > 0) {
+    alert('差戻しされた申請に変更がありません。\n各差戻し日の内容を修正するか、不要な場合は削除してから再申請してください。\n\n対象日:\n' + _unchangedRejectedDates.join('\n'));
+    return;
+  }
+
   var days = dayData.map(function (d, i) {
     var date = new Date(sun); date.setDate(sun.getDate() + i);
     return {
@@ -957,13 +1012,13 @@ function submitWeek() {
 
   google.script.run
     .withSuccessHandler(function (r) {
-      if (submitBtnText) submitBtnText.textContent = actionText;
-      btn.disabled  = false;
-      btn.classList.remove('opacity-75', 'cursor-not-allowed');
       if (r && r.error) {
         // Revert optimistic status on error
         for (var rv = 0; rv < 7; rv++) { dayData[rv].savedStatus = prevStatuses[rv]; }
         renderWeek();
+        if (submitBtnText) submitBtnText.textContent = actionText;
+        btn.disabled  = false;
+        btn.classList.remove('opacity-75', 'cursor-not-allowed');
         alert('エラー: ' + r.error);
         return;
       }
@@ -972,6 +1027,9 @@ function submitWeek() {
       if (count > 0) {
         alert('✅ ' + count + '日分の' + actionText + 'を送信しました\n\nステータス: 申請中 (承認待ち)');
       }
+      if (submitBtnText) submitBtnText.textContent = actionText;
+      btn.disabled  = false;
+      btn.classList.remove('opacity-75', 'cursor-not-allowed');
       
       // Fetch latest data from server to sync
       google.script.run
