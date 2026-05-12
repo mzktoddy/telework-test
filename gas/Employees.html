@@ -88,12 +88,12 @@
       <table class="w-full">
         <thead>
           <tr class="border-b border-slate-200 bg-slate-50">
-            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Name</th>
-            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Email</th>
-            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Department</th>
-            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Role</th>
-            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Status</th>
-            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">Actions</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">氏名</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">メールアドレス</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">部署</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">ロール</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">ステータス</th>
+            <th class="px-6 py-3 text-left text-sm font-semibold text-slate-900">操作</th>
           </tr>
         </thead>
         <tbody id="tableBody" class="divide-y divide-slate-100"></tbody>
@@ -132,10 +132,10 @@
       <div>
         <label class="text-xs font-medium text-slate-700 block mb-1">ロール *</label>
         <select id="newRole" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white">
-          <option value="employee">employee</option>
-          <option value="reviewer">reviewer</option>
-          <option value="manager">manager</option>
-          <option value="admin">admin</option>
+          <option value="employee">一般社員</option>
+          <option value="reviewer">直属上長</option>
+          <option value="manager">部門長</option>
+          <option value="admin">管理者</option>
         </select>
       </div>
       <div>
@@ -256,19 +256,51 @@ function renderDepartmentCheckboxes() {
     container.innerHTML = '<p class="text-xs text-slate-500 py-2">部署がありません</p>';
     return;
   }
-  departments.forEach(function (d) {
+  
+  // Build parent-child map
+  var parentMap = {};
+  var rootDepts = [];
+  
+  departments.forEach(function(d) {
+    if (!d.parent_department || d.parent_department === '') {
+      rootDepts.push(d);
+    } else {
+      if (!parentMap[d.parent_department]) {
+        parentMap[d.parent_department] = [];
+      }
+      parentMap[d.parent_department].push(d);
+    }
+  });
+  
+  // Render departments hierarchically
+  function renderDept(dept, level) {
     var label = document.createElement('label');
     label.className = 'flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer';
+    label.style.paddingLeft = (8 + level * 16) + 'px';
+    
     var checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.value = d.name;
+    checkbox.value = dept.name;
     checkbox.className = 'dept-checkbox w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-2 focus:ring-blue-300';
+    
     var span = document.createElement('span');
-    span.textContent = d.name;
-    span.className = 'text-sm text-slate-700';
+    span.textContent = (level > 0 ? '└ ' : '') + dept.name;
+    span.className = 'text-sm ' + (level === 0 ? 'font-semibold text-slate-800' : 'text-slate-700');
+    
     label.appendChild(checkbox);
     label.appendChild(span);
     container.appendChild(label);
+    
+    // Render children
+    var children = parentMap[dept.id] || [];
+    children.forEach(function(child) {
+      renderDept(child, level + 1);
+    });
+  }
+  
+  // Render all root departments and their children
+  rootDepts.forEach(function(dept) {
+    renderDept(dept, 0);
   });
 }
 

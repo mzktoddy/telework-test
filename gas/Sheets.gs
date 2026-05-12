@@ -34,7 +34,7 @@ function adminExportToNewSpreadsheet(headers, dataRows, sheetTitle) {
 //  Sheets.gs — Google Sheets data layer
 //
 //  Sheet structure mirrors the Drizzle SQLite schema exactly:
-//    departments      → id, name, created_at
+//    departments      → id, name, parent_department, created_at
 //    users            → id, email, password_hash, name, role,
 //                       department_id, is_active, created_at, updated_at
 //    telework_reports → id, employee_id, report_type, start_date,
@@ -68,7 +68,7 @@ function getSheet(name) {
 // ── Setup (run once) ─────────────────────────────────────────
 function setupSheets() {
   var ss = getSpreadsheet();
-  _createSheet(ss, SHEET_DEPARTMENTS, ['id','name','created_at']);
+  _createSheet(ss, SHEET_DEPARTMENTS, ['id','name','parent_department','created_at']);
   _createSheet(ss, SHEET_USERS,       ['id','email','password_hash','name','role','department_id','is_active','created_at','updated_at']);
   _createSheet(ss, SHEET_REPORTS,     ['id','employee_id','report_type','start_date','end_date','request_date','week_title','work_type','day_short','notes','redmine_tasks','status','created_at','updated_at']);
   _createSheet(ss, SHEET_APPROVALS,   ['id','report_id','approver_id','level','decision','comment','decided_at','created_at']);
@@ -143,7 +143,12 @@ function _updateRow(sheetName, id, updates, headers) {
 }
 
 function _uuid()  { return Utilities.getUuid(); }
-function _now()   { return new Date().toISOString(); }
+// Returns current timestamp in Japan Standard Time (JST/Asia/Tokyo) in ISO 8601 format
+function _now()   { 
+  var now = new Date();
+  // Format as ISO 8601 with JST timezone offset (+09:00)
+  return Utilities.formatDate(now, 'Asia/Tokyo', "yyyy-MM-dd'T'HH:mm:ss'+09:00'");
+}
 
 // Calculate week title like "第13週" (Sunday-based week)
 function _getWeekTitle(dateStr) {
@@ -170,7 +175,7 @@ function _getWeekTitle(dateStr) {
 }
 
 // ── Departments ──────────────────────────────────────────────
-var DEPT_H = ['id','name','created_at'];
+var DEPT_H = ['id','name','parent_department','created_at'];
 
 function getAllDepartments() {
   return _sheetToObjects(getSheet(SHEET_DEPARTMENTS));
@@ -178,8 +183,21 @@ function getAllDepartments() {
 function getDepartmentById(id) {
   return getAllDepartments().find(function (d) { return d.id === id; }) || null;
 }
-function createDepartment(name) {
-  var d = { id: _uuid(), name: name, created_at: _now() };
+
+// Filter department IDs to return only CHILD departments (exclude parent departments)
+// A parent department is one where parent_department is empty/null
+function getChildDepartmentsOnly(departmentIds) {
+  if (!departmentIds || departmentIds.length === 0) return [];
+  var allDepts = getAllDepartments();
+  return departmentIds.filter(function(deptId) {
+    var dept = allDepts.find(function(d) { return d.id === deptId; });
+    // Keep only departments that have a parent_department value (i.e., are NOT parent departments)
+    return dept && dept.parent_department && dept.parent_department.trim() !== '';
+  });
+}
+
+function createDepartment(name, parentDepartmentId) {
+  var d = { id: _uuid(), name: name, parent_department: parentDepartmentId || '', created_at: _now() };
   _appendRow(SHEET_DEPARTMENTS, d, DEPT_H);
   return d;
 }
@@ -427,6 +445,12 @@ function getPendingReports() {
     userDeptIds = user.department_id ? [user.department_id] : [];
   }
   
+  // For reviewers and managers (not admin), filter to ONLY child departments
+  var filteredDeptIds = userDeptIds;
+  if (user.role === 'reviewer' || user.role === 'manager') {
+    filteredDeptIds = getChildDepartmentsOnly(userDeptIds);
+  }
+  
   // Group day records by start_date, end_date, and employee_id to reconstruct weeks
   var weekMap = {};
   var allDepts = getAllDepartments();
@@ -504,9 +528,9 @@ function getPendingReports() {
   var filtered = weeks.filter(function (w) {
     if (user.role === 'admin') return true;
     if (user.role === 'reviewer' || user.role === 'manager') {
-      // Check if any of the user's departments match any of the employee's departments
-      if (userDeptIds.length === 0 || w.employee_department_ids.length === 0) return false;
-      return userDeptIds.some(function(userDept) {
+      // Check if any of the user's CHILD departments match any of the employee's departments
+      if (filteredDeptIds.length === 0 || w.employee_department_ids.length === 0) return false;
+      return filteredDeptIds.some(function(userDept) {
         return w.employee_department_ids.indexOf(userDept) !== -1;
       });
     }
@@ -675,11 +699,68 @@ function submitWeekReport(weekData) {
   
   if (emp && emp.department_id) {
     var allUsers = getAllUsers();
+    var allDepts = getAllDepartments();
+    
+    // Parse employee's department IDs
+    var empDeptIds = [];
+    try {
+      if (emp.department_id.startsWith('[')) {
+        empDeptIds = JSON.parse(emp.department_id);
+      } else {
+        empDeptIds = [emp.department_id];
+      }
+    } catch (e) {
+      empDeptIds = [emp.department_id];
+    }
+    
+    // Find reviewer who has at least one matching CHILD department (not parent department)
     reviewer = allUsers.find(function (u) {
-      return u.role === 'reviewer' && u.department_id === emp.department_id && u.is_active;
+      if (u.role !== 'reviewer' || !u.is_active || !u.department_id) return false;
+      
+      // Parse reviewer's department IDs
+      var reviewerDeptIds = [];
+      try {
+        if (u.department_id.startsWith('[')) {
+          reviewerDeptIds = JSON.parse(u.department_id);
+        } else {
+          reviewerDeptIds = [u.department_id];
+        }
+      } catch (e) {
+        reviewerDeptIds = [u.department_id];
+      }
+      
+      // Check if any matching department exists that is NOT a parent department
+      return empDeptIds.some(function(empDept) {
+        if (reviewerDeptIds.indexOf(empDept) === -1) return false;
+        // Found a match - check if it's a child department (has parent_department)
+        var dept = allDepts.find(function(d) { return d.id === empDept; });
+        return dept && dept.parent_department && dept.parent_department.trim() !== '';
+      });
     });
+    
+    // Find manager who has at least one matching CHILD department (not parent department)
     manager = allUsers.find(function (u) {
-      return u.role === 'manager' && u.department_id === emp.department_id && u.is_active;
+      if (u.role !== 'manager' || !u.is_active || !u.department_id) return false;
+      
+      // Parse manager's department IDs
+      var managerDeptIds = [];
+      try {
+        if (u.department_id.startsWith('[')) {
+          managerDeptIds = JSON.parse(u.department_id);
+        } else {
+          managerDeptIds = [u.department_id];
+        }
+      } catch (e) {
+        managerDeptIds = [u.department_id];
+      }
+      
+      // Check if any matching department exists that is NOT a parent department
+      return empDeptIds.some(function(empDept) {
+        if (managerDeptIds.indexOf(empDept) === -1) return false;
+        // Found a match - check if it's a child department (has parent_department)
+        var dept = allDepts.find(function(d) { return d.id === empDept; });
+        return dept && dept.parent_department && dept.parent_department.trim() !== '';
+      });
     });
   }
 
@@ -762,15 +843,18 @@ function reviewWeekReport(dayIds, comment) {
   // Send notification for the week
   if (firstReport && employee) {
     try {
-      sendMattermostNotification({
-        employee_name: employee.name,
-        week_title: firstReport.week_title || '',
-        start_date: firstReport.start_date || '',
-        end_date: firstReport.end_date || '',
-        approver_name: user.name,
+      var notificationData = {
+        reportType: 'telework',
+        reportDate: firstReport.start_date,
+        weekTitle: firstReport.week_title,
+        employeeName: employee.name,
+        employeeEmail: employee.email,
+        approverName: user.name,
         decision: 'reviewed',
-        comment: comment || ''
-      });
+        reportUrl: ScriptApp.getService().getUrl() + '?page=reports',
+      };
+      sendMattermostMessage(notificationData, 'daily-report');
+      
     } catch (e) {
       Logger.log('Mattermost notification failed: ' + e.message);
     }
@@ -1023,8 +1107,11 @@ function getApproveDepartments() {
       userDeptIds = user.department_id ? [user.department_id] : [];
     }
     
+    // Filter to ONLY child departments (exclude parent departments)
+    var childDeptIds = getChildDepartmentsOnly(userDeptIds);
+    
     return depts.filter(function(d) {
-      return userDeptIds.indexOf(d.id) !== -1;
+      return childDeptIds.indexOf(d.id) !== -1;
     }).map(function(d) {
       return { id: d.id, name: d.name };
     });
@@ -1160,49 +1247,71 @@ function submitTaskReport(payload) {
   // Create approval records
   var emp = getUserById(user.id);
   if (emp && emp.department_id) {
-    // Find reviewer and manager in any matching department
+    var allUsers = getAllUsers();
+    var allDepts = getAllDepartments();
+    
+    // Parse employee's department IDs
     var empDeptIds = [];
-    if (emp && emp.department_id) {
-      try {
-        if (emp.department_id.startsWith('[')) {
-          empDeptIds = JSON.parse(emp.department_id);
-        } else {
-          empDeptIds = [emp.department_id];
-        }
-      } catch (e) {
+    try {
+      if (emp.department_id.startsWith('[')) {
+        empDeptIds = JSON.parse(emp.department_id);
+      } else {
         empDeptIds = [emp.department_id];
       }
+    } catch (e) {
+      empDeptIds = [emp.department_id];
     }
     
-    var allUsers = getAllUsers();
+    // Find reviewer who has at least one matching CHILD department (not parent department)
     var reviewer = allUsers.find(function (u) {
-      if (u.role !== 'reviewer' || !u.is_active) return false;
-      var userDeptIds = [];
+      if (u.role !== 'reviewer' || !u.is_active || !u.department_id) return false;
+      
+      // Parse reviewer's department IDs
+      var reviewerDeptIds = [];
       try {
-        if (u.department_id && u.department_id.startsWith('[')) {
-          userDeptIds = JSON.parse(u.department_id);
-        } else if (u.department_id) {
-          userDeptIds = [u.department_id];
+        if (u.department_id.startsWith('[')) {
+          reviewerDeptIds = JSON.parse(u.department_id);
+        } else {
+          reviewerDeptIds = [u.department_id];
         }
       } catch (e) {
-        userDeptIds = u.department_id ? [u.department_id] : [];
+        reviewerDeptIds = [u.department_id];
       }
-      return userDeptIds.some(function(d) { return empDeptIds.indexOf(d) !== -1; });
+      
+      // Check if any matching department exists that is NOT a parent department
+      return empDeptIds.some(function(empDept) {
+        if (reviewerDeptIds.indexOf(empDept) === -1) return false;
+        // Found a match - check if it's a child department (has parent_department)
+        var dept = allDepts.find(function(d) { return d.id === empDept; });
+        return dept && dept.parent_department && dept.parent_department.trim() !== '';
+      });
     });
+    
+    // Find manager who has at least one matching CHILD department (not parent department)
     var manager = allUsers.find(function (u) {
-      if (u.role !== 'manager' || !u.is_active) return false;
-      var userDeptIds = [];
+      if (u.role !== 'manager' || !u.is_active || !u.department_id) return false;
+      
+      // Parse manager's department IDs
+      var managerDeptIds = [];
       try {
-        if (u.department_id && u.department_id.startsWith('[')) {
-          userDeptIds = JSON.parse(u.department_id);
-        } else if (u.department_id) {
-          userDeptIds = [u.department_id];
+        if (u.department_id.startsWith('[')) {
+          managerDeptIds = JSON.parse(u.department_id);
+        } else {
+          managerDeptIds = [u.department_id];
         }
       } catch (e) {
-        userDeptIds = u.department_id ? [u.department_id] : [];
+        managerDeptIds = [u.department_id];
       }
-      return userDeptIds.some(function(d) { return empDeptIds.indexOf(d) !== -1; });
+      
+      // Check if any matching department exists that is NOT a parent department
+      return empDeptIds.some(function(empDept) {
+        if (managerDeptIds.indexOf(empDept) === -1) return false;
+        // Found a match - check if it's a child department (has parent_department)
+        var dept = allDepts.find(function(d) { return d.id === empDept; });
+        return dept && dept.parent_department && dept.parent_department.trim() !== '';
+      });
     });
+    
     var existingApprovals = getApprovalsByReport(existingId);
     if (existingApprovals.length === 0) {
       if (reviewer) createApproval(existingId, reviewer.id, 1);
@@ -1331,6 +1440,12 @@ function getPendingTaskReports() {
   } catch (e) {
     userDeptIds = user.department_id ? [user.department_id] : [];
   }
+  
+  // For reviewers and managers (not admin), filter to ONLY child departments
+  var filteredDeptIds = userDeptIds;
+  if (user.role === 'reviewer' || user.role === 'manager') {
+    filteredDeptIds = getChildDepartmentsOnly(userDeptIds);
+  }
 
   var allTR = getAllTaskReports().filter(function (r) {
     return r.status === 'submitted' || r.status === 'reviewed';
@@ -1384,11 +1499,11 @@ function getPendingTaskReports() {
   return mapped.filter(function (r) {
     // Admin can see all
     if (user.role === 'admin') return true;
-    // Reviewer and Manager can only see their department(s)
+    // Reviewer and Manager can only see their CHILD department(s)
     if (user.role === 'reviewer' || user.role === 'manager') {
-      // Check if any of the user's departments match any of the employee's departments
-      if (userDeptIds.length === 0 || r.employee_department_ids.length === 0) return false;
-      return userDeptIds.some(function(userDept) {
+      // Check if any of the user's CHILD departments match any of the employee's departments
+      if (filteredDeptIds.length === 0 || r.employee_department_ids.length === 0) return false;
+      return filteredDeptIds.some(function(userDept) {
         return r.employee_department_ids.indexOf(userDept) !== -1;
       });
     }
@@ -1418,14 +1533,16 @@ function reviewTaskReportAction(reportId, comment) {
   var employee = getUserById(report.employee_id);
   if (employee) {
     try {
-      sendMattermostNotification({
-        employee_name: employee.name,
-        report_date: report.report_date || '',
-        approver_name: user.name,
+      var notificationData = {
+        reportType: 'task',
+        reportDate: report.report_date,
+        employeeName: employee.name,
+        employeeEmail: employee.email,
+        approverName: user.name,
         decision: 'reviewed',
-        comment: comment || '',
-        report_type: 'task_report'
-      });
+        reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
+      };
+      sendMattermostMessage(notificationData, 'daily-report');
     } catch (e) {
       Logger.log('Mattermost notification failed: ' + e.message);
     }
@@ -1638,6 +1755,14 @@ function getAdminTaskReports() {
 function adminDeleteTeleworkReport(id) {
   var user = getCurrentUser();
   if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  
+  // Delete associated approvals first
+  var approvals = getApprovalsByReport(id);
+  approvals.forEach(function(approval) {
+    _deleteRowById(SHEET_APPROVALS, approval.id);
+  });
+  
+  // Delete the report
   return _deleteRowById(SHEET_REPORTS, id);
 }
 
@@ -1645,6 +1770,14 @@ function adminDeleteTeleworkReport(id) {
 function adminDeleteTaskReport(id) {
   var user = getCurrentUser();
   if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  
+  // Delete associated approvals first
+  var approvals = getApprovalsByReport(id);
+  approvals.forEach(function(approval) {
+    _deleteRowById(SHEET_APPROVALS, approval.id);
+  });
+  
+  // Delete the report
   return _deleteRowById(SHEET_TASK_REPORTS, id);
 }
 
@@ -1703,13 +1836,19 @@ function getTeamCalendarData() {
     }
   }
   
+  // For reviewers and employees (not admin), filter to ONLY child departments
+  var filteredDeptIds = userDeptIds;
+  if (user.role !== 'admin') {
+    filteredDeptIds = getChildDepartmentsOnly(userDeptIds);
+  }
+  
   return reports
     .filter(function (r) { return r.status && r.status !== 'draft'; })
     .filter(function (r) {
       // Admin sees all
       if (user.role === 'admin') return true;
       
-      // For managers, reviewers, and employees: check if employee is in any of user's departments
+      // For managers, reviewers, and employees: check if employee is in any of user's CHILD departments
       var emp = users.find(function (u) { return u.id === r.employee_id; });
       if (!emp || !emp.department_id) return false;
       
@@ -1725,8 +1864,8 @@ function getTeamCalendarData() {
         empDeptIds = [emp.department_id];
       }
       
-      // Check if any of user's departments match any of employee's departments
-      return userDeptIds.some(function(userDept) {
+      // Check if any of user's CHILD departments match any of employee's departments
+      return filteredDeptIds.some(function(userDept) {
         return empDeptIds.indexOf(userDept) !== -1;
       });
     })
@@ -1795,8 +1934,11 @@ function getTeamCalendarDepartments() {
       userDeptIds = user.department_id ? [user.department_id] : [];
     }
     
+    // Filter to ONLY child departments (exclude parent departments)
+    var childDeptIds = getChildDepartmentsOnly(userDeptIds);
+    
     return depts.filter(function(d) {
-      return userDeptIds.indexOf(d.id) !== -1;
+      return childDeptIds.indexOf(d.id) !== -1;
     }).map(function(d) {
       return { id: d.id, name: d.name };
     });
@@ -1907,6 +2049,13 @@ function getDepartmentDashboardData() {
     return { error: 'ユーザーに部門が割り当てられていません' };
   }
 
+  // Filter to ONLY child departments (exclude parent departments)
+  var childDeptIds = getChildDepartmentsOnly(userDeptIds);
+  
+  if (childDeptIds.length === 0) {
+    return { error: 'ユーザーに子部門が割り当てられていません' };
+  }
+
   // Compute Mon–Fri date strings for the current week
   var today  = new Date();
   var dow    = today.getDay(); // 0=Sun … 6=Sat
@@ -1922,8 +2071,8 @@ function getDepartmentDashboardData() {
     weekDays.push(_dateStr(d));
   }
 
-  // Get all employees from ALL user's departments
-  var deptUsers = getUsersByDepartments(userDeptIds).filter(function(u) {
+  // Get all employees from ONLY child departments (NOT parent departments)
+  var deptUsers = getUsersByDepartments(childDeptIds).filter(function(u) {
     return u.role === 'employee' && u.is_active;
   });
   var deptUserIds = deptUsers.map(function(u) { return u.id; });
@@ -1972,11 +2121,17 @@ function _seedData(ss) {
   var dSheet = ss.getSheetByName(SHEET_DEPARTMENTS);
   if (dSheet.getLastRow() > 1) return; // already seeded
 
+  // Create parent departments first
+  var parentDept1 = { id: _uuid(), name: 'エンジニアリング部門', parent_department: '', created_at: _now() };
+  var parentDept2 = { id: _uuid(), name: '管理部門', parent_department: '', created_at: _now() };
+  
   var depts = [
-    { id: _uuid(), name: 'エンジニアリング第1チーム', created_at: _now() },
-    { id: _uuid(), name: 'UI/UXデザイン',             created_at: _now() },
-    { id: _uuid(), name: 'システムエンジニア',         created_at: _now() },
-    { id: _uuid(), name: '人事部',                     created_at: _now() },
+    parentDept1,
+    parentDept2,
+    { id: _uuid(), name: 'エンジニアリング第1チーム', parent_department: parentDept1.id, created_at: _now() },
+    { id: _uuid(), name: 'UI/UXデザイン',             parent_department: parentDept1.id, created_at: _now() },
+    { id: _uuid(), name: 'システムエンジニア',         parent_department: parentDept1.id, created_at: _now() },
+    { id: _uuid(), name: '人事部',                     parent_department: parentDept2.id, created_at: _now() },
   ];
   depts.forEach(function (d) { _appendRow(SHEET_DEPARTMENTS, d, DEPT_H); });
 

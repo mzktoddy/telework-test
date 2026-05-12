@@ -360,7 +360,7 @@ function sendMattermostMessage(notificationData, channel) {
     
     // Determine status message
     var statusText = notificationData.decision === 'approved' ? '承認' : 
-                     notificationData.decision === 'reviewed' ? '照査' : '却下';
+                     notificationData.decision === 'reviewed' ? '照査' : '差戻';
     
     // System URL (you may need to update this to your actual system URL)
     var systemUrl = notificationData.reportUrl || ScriptApp.getService().getUrl();
@@ -609,7 +609,10 @@ function sendDailyPendingNotifications() {
     .forEach(function(reviewer) {
       var deptIds = getDeptIds(reviewer);
       if (!deptIds.length) return;
-      var empIds  = getEmpIdsForDepts(deptIds);
+      // Filter to ONLY child departments (exclude parent departments)
+      var childDeptIds = getChildDepartmentsOnly(deptIds);
+      if (!childDeptIds.length) return;
+      var empIds  = getEmpIdsForDepts(childDeptIds);
       if (!empIds.length) return;
 
       var pendingTelework = allReports.filter(function(r) {
@@ -631,7 +634,10 @@ function sendDailyPendingNotifications() {
     .forEach(function(manager) {
       var deptIds = getDeptIds(manager);
       if (!deptIds.length) return;
-      var empIds  = getEmpIdsForDepts(deptIds);
+      // Filter to ONLY child departments (exclude parent departments)
+      var childDeptIds = getChildDepartmentsOnly(deptIds);
+      if (!childDeptIds.length) return;
+      var empIds  = getEmpIdsForDepts(childDeptIds);
       if (!empIds.length) return;
 
       var pendingTelework = allReports.filter(function(r) {

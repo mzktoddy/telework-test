@@ -262,7 +262,11 @@ function renderList() {
   var status = document.getElementById('statusFilter').value;
   var type   = document.getElementById('typeFilter').value;
   var filtered = allReports.filter(function (r) {
-    if (dept !== 'all' && r.employee_department !== dept) return false;
+    // Check if department name is included in employee_department (handles multi-department employees)
+    if (dept !== 'all') {
+      var empDepts = (r.employee_department || '').split(',').map(function(d) { return d.trim(); });
+      if (empDepts.indexOf(dept) === -1) return false;
+    }
     if (status !== 'all' && r.status !== status) return false;
     if (type !== 'all' && r._type !== type) return false;
     return true;
