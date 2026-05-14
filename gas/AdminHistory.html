@@ -103,28 +103,67 @@
   </div>
 
   <!-- Filters -->
-  <div class="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex items-center gap-4">
-    <div class="relative flex-1 max-w-xs">
-      <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-      </svg>
-      <input id="searchName" type="text" placeholder="従業員名で検索..."
-        oninput="applyFilters()"
-        class="w-full pl-10 pr-3 h-9 border border-slate-300 rounded-lg text-sm
-               focus:outline-none focus:ring-2 focus:ring-blue-300" />
+  <div class="bg-white rounded-xl border border-slate-200 p-4 mb-6">
+    <!-- Row 1: Date Range Filter -->
+    <div class="flex items-center gap-4 mb-4 pb-4 border-b border-slate-100">
+      <div class="flex items-center gap-2">
+        <label class="text-sm text-slate-600 font-medium whitespace-nowrap">期間:</label>
+        <input id="filterStartDate" type="date" onchange="onDateRangeChangeQuick()"
+          class="h-9 px-3 border border-slate-300 rounded-lg text-sm
+                 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-700" />
+        <span class="text-slate-400">〜</span>
+        <input id="filterEndDate" type="date" onchange="onDateRangeChangeQuick()"
+          class="h-9 px-3 border border-slate-300 rounded-lg text-sm
+                 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-700" />
+      </div>
+      <select id="weekFilter"
+        class="h-9 px-3 min-w-[200px] border border-slate-300 rounded-lg text-sm
+               focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-700">
+        <option value="">全週</option>
+      </select>
+      <select id="statusFilter"
+        class="h-9 px-3 min-w-[140px] border border-slate-300 rounded-lg text-sm
+               focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-700">
+        <option value="">全ステータス</option>
+        <option value="draft">未作成</option>
+        <option value="submitted">申請中</option>
+        <option value="reviewed">照査済</option>
+        <option value="approved">承認済み</option>
+        <option value="rejected">差戻し</option>
+      </select>
+      <button onclick="loadDataFromServer(1)"
+        class="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        検索
+      </button>
+      <button onclick="clearFilters()"
+        class="h-9 px-4 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2 whitespace-nowrap">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+        クリア
+      </button>
     </div>
-    <select id="weekFilter" onchange="applyFilters()"
-      class="h-9 px-3 min-w-[280px] border border-slate-300 rounded-lg text-sm
-             focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-700">
-      <option value="">全期間</option>
-    </select>
-    <button onclick="clearFilters()"
-      class="h-9 px-4 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2 whitespace-nowrap">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-      </svg>
-      フィルタクリア
-    </button>
+    <!-- Row 2: Search -->
+    <div class="flex items-center gap-4">
+      <div class="relative flex-1 max-w-xs">
+        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <input id="searchName" type="text" placeholder="従業員名で検索..."
+          oninput="debounceSearch()"
+          class="w-full pl-10 pr-3 h-9 border border-slate-300 rounded-lg text-sm
+                 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Pagination Info -->
+  <div id="paginationInfo" class="flex items-center justify-between mb-4">
+    <div class="text-sm text-slate-500" id="resultSummary">読み込み中...</div>
+    <div class="flex items-center gap-2" id="paginationControls"></div>
   </div>
 
   <!-- States: loading / empty / table -->
@@ -246,9 +285,13 @@ var _activeTab    = 'telework';
 var _teleData     = [];
 var _taskData     = [];
 var _filteredRows = [];
-var _teleLoaded   = false;
-var _taskLoaded   = false;
 var _exportLink   = null;
+
+// Pagination state
+var _telePagination = { page: 1, pageSize: 10, totalPages: 1, totalItems: 0 };
+var _taskPagination = { page: 1, pageSize: 10, totalPages: 1, totalItems: 0 };
+var _isLoading = false;
+var _searchDebounceTimer = null;
 
 // ── Utilities ─────────────────────────────────────────────────
 function escHtml(s) {
@@ -293,16 +336,16 @@ function getISOWeekLabel(dateStr) {
   return '第' + wk + '週 ' + utcD.getUTCFullYear();
 }
 
-function getMondayKey(dateStr) {
+function getSundayKey(dateStr) {
   if (!dateStr) return null;
   var d = new Date(dateStr);
   if (isNaN(d.getTime())) return null;
-  var dow = d.getDay() === 0 ? 6 : d.getDay() - 1; // 0=Mon … 6=Sun
-  var mon = new Date(d);
-  mon.setDate(d.getDate() - dow);
-  return mon.getFullYear() + '-' +
-    String(mon.getMonth() + 1).padStart(2, '0') + '-' +
-    String(mon.getDate()).padStart(2, '0');
+  var dow = d.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
+  var sun = new Date(d);
+  sun.setDate(d.getDate() - dow);
+  return sun.getFullYear() + '-' +
+    String(sun.getMonth() + 1).padStart(2, '0') + '-' +
+    String(sun.getDate()).padStart(2, '0');
 }
 
 function fmtDateShort(dateStr) {
@@ -344,38 +387,92 @@ function actionBtns(id, type) {
     '削除</button></span>';
 }
 
-// ── Load data from server ─────────────────────────────────────
-google.script.run
-  .withSuccessHandler(function (data) {
-    _teleData = Array.isArray(data) ? data : [];
-    _teleLoaded = true;
-    _checkReady();
-  })
-  .withFailureHandler(function (err) {
-    _teleLoaded = true;
-    _checkReady();
-    showToast('在宅勤務データの読み込みに失敗しました', true);
-  })
-  .getAdminTeleworkReports();
+// ── Initialize date filters to default (last 1 month) ────────
+(function initDateFilters() {
+  var today = new Date();
+  var oneMonthAgo = new Date();
+  oneMonthAgo.setMonth(today.getMonth() - 1);
+  
+  document.getElementById('filterEndDate').value = today.toISOString().split('T')[0];
+  document.getElementById('filterStartDate').value = oneMonthAgo.toISOString().split('T')[0];
+})();
 
-google.script.run
-  .withSuccessHandler(function (data) {
-    _taskData = Array.isArray(data) ? data : [];
-    _taskLoaded = true;
-    _checkReady();
-  })
-  .withFailureHandler(function (err) {
-    _taskLoaded = true;
-    _checkReady();
-    showToast('日報データの読み込みに失敗しました', true);
-  })
-  .getAdminTaskReports();
-
-function _checkReady() {
-  if (!_teleLoaded || !_taskLoaded) return;
-  document.getElementById('tableLoading').classList.add('hidden');
-  switchTab('telework');
+// ── Load data from server with pagination ─────────────────────
+function loadDataFromServer(page, rebuildWeekOptions) {
+  if (_isLoading) return;
+  _isLoading = true;
+  
+  // Default: rebuild week options only on page 1 (new search)
+  if (rebuildWeekOptions === undefined) {
+    rebuildWeekOptions = (page === 1);
+  }
+  
+  var pagination = _activeTab === 'telework' ? _telePagination : _taskPagination;
+  page = page || pagination.page;
+  
+  var options = {
+    startDate: document.getElementById('filterStartDate').value || null,
+    endDate: document.getElementById('filterEndDate').value || null,
+    status: document.getElementById('statusFilter').value || null,
+    weekSundayKey: document.getElementById('weekFilter').value || null,
+    employeeName: document.getElementById('searchName').value.trim() || null,
+    page: page,
+    pageSize: 10
+  };
+  
+  document.getElementById('tableLoading').classList.remove('hidden');
+  document.getElementById('tableWrap').classList.add('hidden');
+  document.getElementById('tableEmpty').classList.add('hidden');
+  clearExportLink();
+  
+  var fn = _activeTab === 'telework' ? 'getAdminTeleworkReportsPaginated' : 'getAdminTaskReportsPaginated';
+  
+  google.script.run
+    .withSuccessHandler(function (result) {
+      _isLoading = false;
+      document.getElementById('tableLoading').classList.add('hidden');
+      
+      if (result && result.error) {
+        showToast(result.error, true);
+        return;
+      }
+      
+      var data = result.items || [];
+      var paginationData = {
+        page: result.page || 1,
+        pageSize: result.pageSize || 10,
+        totalPages: result.totalPages || 1,
+        totalItems: result.totalItems || 0
+      };
+      
+      if (_activeTab === 'telework') {
+        _teleData = data;
+        _telePagination = paginationData;
+      } else {
+        _taskData = data;
+        _taskPagination = paginationData;
+      }
+      
+      if (rebuildWeekOptions) {
+        fetchAndBuildWeekOptions();
+      }
+      _filteredRows = data;
+      renderTable();
+      renderPagination();
+      updatePaginationSummary();
+    })
+    .withFailureHandler(function (err) {
+      _isLoading = false;
+      document.getElementById('tableLoading').classList.add('hidden');
+      updatePaginationSummary();
+      showToast('データの読み込みに失敗しました: ' + ((err && err.message) || '不明'), true);
+    })
+    [fn](options);
 }
+
+// Initial load
+fetchAndBuildWeekOptions(); // Load week options first
+loadDataFromServer(1);
 
 // ── Tab switching ─────────────────────────────────────────────
 function switchTab(tab) {
@@ -385,40 +482,200 @@ function switchTab(tab) {
   document.getElementById('tabTelework').className = tab === 'telework' ? activeClass : inactiveClass;
   document.getElementById('tabTask').className     = tab === 'task'     ? activeClass : inactiveClass;
   document.getElementById('searchName').value = '';
+  document.getElementById('weekFilter').value = '';
   clearExportLink();
-  buildWeekOptions();
-  applyFilters();
+  
+  // Show loading state in week filter
+  var weekFilterEl = document.getElementById('weekFilter');
+  weekFilterEl.disabled = true;
+  weekFilterEl.innerHTML = '<option value="">読み込み中...</option>';
+  
+  fetchAndBuildWeekOptions();
+  loadDataFromServer(1, false); // Don't rebuild (we just did it above)
 }
 
-// ── Build week dropdown dynamically from data ─────────────────
-function buildWeekOptions() {
-  var data  = _activeTab === 'telework' ? _teleData : _taskData;
+// ── Debounced search for employee name ────────────────────────
+function debounceSearch() {
+  clearTimeout(_searchDebounceTimer);
+  _searchDebounceTimer = setTimeout(function() {
+    loadDataFromServer(1);
+  }, 400);
+}
+
+// ── Quick date range change (only rebuild week options) ───────────────
+function onDateRangeChangeQuick() {
+  // Reset week filter when date range changes
+  document.getElementById('weekFilter').value = '';
+  // Show loading state in week filter
+  var weekFilterEl = document.getElementById('weekFilter');
+  weekFilterEl.disabled = true;
+  weekFilterEl.innerHTML = '<option value="">読み込み中...</option>';
+  // Only fetch available weeks, don't reload data yet
+  fetchAndBuildWeekOptions();
+}
+
+// ── Handle date range change (legacy - kept for compatibility) ────────────
+function onDateRangeChange() {
+  // Reset week filter when date range changes
+  document.getElementById('weekFilter').value = '';
+  // Fetch available weeks for the new date range
+  fetchAndBuildWeekOptions();
+  // Reload data
+  loadDataFromServer(1, false); // Don't rebuild week options (we just did it above)
+}
+
+// ── Fetch available weeks and build dropdown ───────────────────────
+function fetchAndBuildWeekOptions() {
+  var options = {
+    startDate: document.getElementById('filterStartDate').value || null,
+    endDate: document.getElementById('filterEndDate').value || null,
+    reportType: _activeTab
+  };
+  
+  google.script.run
+    .withSuccessHandler(function(weeks) {
+      var weekFilterEl = document.getElementById('weekFilter');
+      weekFilterEl.disabled = false;
+      
+      if (weeks && weeks.error) {
+        console.error('Failed to fetch weeks:', weeks.error);
+        weekFilterEl.innerHTML = '<option value="">エラー</option>';
+        return;
+      }
+      buildWeekOptionsFromWeeks(weeks || []);
+    })
+    .withFailureHandler(function(err) {
+      console.error('Failed to fetch weeks:', err);
+      var weekFilterEl = document.getElementById('weekFilter');
+      weekFilterEl.disabled = false;
+      weekFilterEl.innerHTML = '<option value="">エラー</option>';
+    })
+    .getAvailableWeeksForDateRange(options);
+}
+
+// ── Build week dropdown from week objects ─────────────────────────
+function buildWeekOptionsFromWeeks(weeks) {
+  var sel = document.getElementById('weekFilter');
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">全週</option>';
+  
+  weeks.forEach(function(w) {
+    var opt = document.createElement('option');
+    opt.value = w.sundayKey;
+    opt.textContent = w.label;
+    if (w.sundayKey === cur) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+// ── Render pagination controls ────────────────────────────────
+function renderPagination() {
+  var pagination = _activeTab === 'telework' ? _telePagination : _taskPagination;
+  var controlsEl = document.getElementById('paginationControls');
+  
+  // Pagination controls
+  if (pagination.totalPages <= 1) {
+    controlsEl.innerHTML = '';
+    return;
+  }
+  
+  var html = '';
+  
+  // Previous button
+  html += '<button onclick="goToPage(' + (pagination.page - 1) + ')" ' +
+    (pagination.page <= 1 ? 'disabled ' : '') +
+    'class="h-9 px-3 border border-slate-300 rounded-lg text-sm text-slate-700 ' +
+    (pagination.page <= 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50') + ' transition-colors">' +
+    '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+    '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>' +
+    '</svg></button>';
+  
+  // Page numbers
+  var startPage = Math.max(1, pagination.page - 2);
+  var endPage = Math.min(pagination.totalPages, pagination.page + 2);
+  
+  if (startPage > 1) {
+    html += '<button onclick="goToPage(1)" class="h-9 w-9 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors">1</button>';
+    if (startPage > 2) {
+      html += '<span class="text-slate-400">...</span>';
+    }
+  }
+  
+  for (var p = startPage; p <= endPage; p++) {
+    if (p === pagination.page) {
+      html += '<button class="h-9 w-9 bg-blue-600 text-white rounded-lg text-sm font-medium">' + p + '</button>';
+    } else {
+      html += '<button onclick="goToPage(' + p + ')" class="h-9 w-9 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors">' + p + '</button>';
+    }
+  }
+  
+  if (endPage < pagination.totalPages) {
+    if (endPage < pagination.totalPages - 1) {
+      html += '<span class="text-slate-400">...</span>';
+    }
+    html += '<button onclick="goToPage(' + pagination.totalPages + ')" class="h-9 w-9 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors">' + pagination.totalPages + '</button>';
+  }
+  
+  // Next button
+  html += '<button onclick="goToPage(' + (pagination.page + 1) + ')" ' +
+    (pagination.page >= pagination.totalPages ? 'disabled ' : '') +
+    'class="h-9 px-3 border border-slate-300 rounded-lg text-sm text-slate-700 ' +
+    (pagination.page >= pagination.totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50') + ' transition-colors">' +
+    '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+    '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>' +
+    '</svg></button>';
+  
+  controlsEl.innerHTML = html;
+}
+
+// ── Update pagination summary based on filters ────────────────
+function updatePaginationSummary() {
+  var summaryEl = document.getElementById('resultSummary');
+  var pagination = _activeTab === 'telework' ? _telePagination : _taskPagination;
+  var start = ((pagination.page - 1) * pagination.pageSize) + 1;
+  var end = Math.min(pagination.page * pagination.pageSize, pagination.totalItems);
+  if (pagination.totalItems === 0) {
+    summaryEl.textContent = '該当データなし';
+  } else {
+    summaryEl.textContent = pagination.totalItems + '件中 ' + start + '〜' + end + '件を表示';
+  }
+}
+
+function goToPage(page) {
+  var pagination = _activeTab === 'telework' ? _telePagination : _taskPagination;
+  if (page < 1 || page > pagination.totalPages) return;
+  // Don't rebuild week options when paginating
+  loadDataFromServer(page, false);
+}
+
+// ── Build week dropdown from returned data ────────────────────
+function buildWeekOptionsFromData(data) {
   var seen  = {};
   var weeks = [];
 
   data.forEach(function (r) {
     var dateStr = _activeTab === 'telework' ? r.request_date : r.report_date;
-    var monKey  = getMondayKey(dateStr);
-    if (!monKey || seen[monKey]) return;
-    seen[monKey] = true;
+    var sunKey  = getSundayKey(dateStr);
+    if (!sunKey || seen[sunKey]) return;
+    seen[sunKey] = true;
 
-    var mon = new Date(monKey);
-    var sat = new Date(mon);
-    sat.setDate(mon.getDate() + 5);
+    var sun = new Date(sunKey);
+    var sat = new Date(sun);
+    sat.setDate(sun.getDate() + 6);
 
     var weekTitlePart = (_activeTab === 'telework' && r.week_title)
       ? r.week_title
       : getISOWeekLabel(dateStr).split(' ')[0];
 
-    var rangeStr = fmtDateShort(mon) + '（月）〜' + fmtDateShort(sat);
-    weeks.push({ key: monKey, label: weekTitlePart + ' ' + rangeStr, ts: mon.getTime() });
+    var rangeStr = fmtDateShort(sun) + '（日）〜' + fmtDateShort(sat) + '（土）';
+    weeks.push({ key: sunKey, label: weekTitlePart + ' ' + rangeStr, ts: sun.getTime() });
   });
 
   weeks.sort(function (a, b) { return b.ts - a.ts; });
 
   var sel = document.getElementById('weekFilter');
   var cur = sel.value;
-  sel.innerHTML = '<option value="">全期間</option>';
+  sel.innerHTML = '<option value="">全週</option>';
   weeks.forEach(function (w) {
     var opt = document.createElement('option');
     opt.value = w.key;
@@ -428,30 +685,28 @@ function buildWeekOptions() {
   });
 }
 
-// ── Apply filters ─────────────────────────────────────────────
-function applyFilters() {
-  var name    = document.getElementById('searchName').value.trim().toLowerCase();
-  var weekKey = document.getElementById('weekFilter').value;
-  var data    = _activeTab === 'telework' ? _teleData : _taskData;
 
-  _filteredRows = data.filter(function (r) {
-    if (name && r.employee_name.toLowerCase().indexOf(name) === -1) return false;
-    if (weekKey) {
-      var dateStr = _activeTab === 'telework' ? r.request_date : r.report_date;
-      if (getMondayKey(dateStr) !== weekKey) return false;
-    }
-    return true;
-  });
-
-  renderTable();
-}
 
 // ── Clear filters ─────────────────────────────────────────────
 function clearFilters() {
+  // Reset date range to last 1 month
+  var today = new Date();
+  var oneMonthAgo = new Date();
+  oneMonthAgo.setMonth(today.getMonth() - 1);
+  
+  document.getElementById('filterEndDate').value = today.toISOString().split('T')[0];
+  document.getElementById('filterStartDate').value = oneMonthAgo.toISOString().split('T')[0];
+  document.getElementById('statusFilter').value = '';
   document.getElementById('searchName').value = '';
   document.getElementById('weekFilter').value = '';
+  
+  // Show loading state in week filter
+  var weekFilterEl = document.getElementById('weekFilter');
+  weekFilterEl.disabled = true;
+  weekFilterEl.innerHTML = '<option value="">読み込み中...</option>';
+  
   clearExportLink();
-  applyFilters();
+  loadDataFromServer(1);
 }
 
 // ── Clear export link ─────────────────────────────────────────
@@ -533,13 +788,16 @@ function deleteOne(id, type) {
   google.script.run
     .withSuccessHandler(function (ok) {
       if (ok) {
+        // Remove from local data and re-render
         if (type === 'telework') {
           _teleData = _teleData.filter(function (r) { return r.id !== id; });
+          _telePagination.totalItems = Math.max(0, _telePagination.totalItems - 1);
         } else {
           _taskData = _taskData.filter(function (r) { return r.id !== id; });
+          _taskPagination.totalItems = Math.max(0, _taskPagination.totalItems - 1);
         }
-        buildWeekOptions();
-        applyFilters();
+        // Reload to refresh counts
+        loadDataFromServer(_activeTab === 'telework' ? _telePagination.page : _taskPagination.page, false);
         showToast('削除しました');
       } else {
         if (row) row.style.opacity = '1';
@@ -585,72 +843,33 @@ function bulkDelete() {
 
 function _afterBulkDelete(ids, type, failed) {
   document.getElementById('pageLoader').classList.add('hidden');
-  var idSet = {};
-  ids.forEach(function (id) { idSet[id] = true; });
-  if (type === 'telework') {
-    _teleData = _teleData.filter(function (r) { return !idSet[r.id]; });
-  } else {
-    _taskData = _taskData.filter(function (r) { return !idSet[r.id]; });
-  }
-  buildWeekOptions();
-  applyFilters();
   var done = ids.length - failed;
   showToast(failed > 0 ? done + '件削除しました（' + failed + '件失敗）' : done + '件削除しました', failed > 0);
+  // Reload data from server to get accurate count
+  loadDataFromServer(1);
 }
 
 // ── Export to spreadsheet ─────────────────────────────────────
 function exportToSheet() {
-  if (_filteredRows.length === 0) {
-    showToast('エクスポートする対象がありません', true);
-    return;
-  }
-  var now   = new Date();
-  var stamp = now.getFullYear() +
-    ('0' + (now.getMonth() + 1)).slice(-2) +
-    ('0' + now.getDate()).slice(-2) + '_' +
-    ('0' + now.getHours()).slice(-2) +
-    ('0' + now.getMinutes()).slice(-2);
-
-  var title, headers, dataRows;
-  if (_activeTab === 'telework') {
-    title = '在宅勤務申請_' + stamp;
-    headers = ['週', '従業員名', '部署', '勤務種別', '対象日', '曜日', 'ステータス', '作業予定内容', '作成日時'];
-    dataRows = _filteredRows.map(function (r) {
-      return [
-        r.week_title,
-        r.employee_name,
-        r.department,
-        r.work_type,
-        r.request_date,
-        r.day_short,
-        statusLabel(r.status),
-        r.notes,
-        r.created_at
-      ];
-    });
-  } else {
-    title = '日報報告_' + stamp;
-    headers = ['従業員名', '部署', '対象日', '曜日', 'ステータス', '作業報告', '翌日の計画', '作成日時'];
-    dataRows = _filteredRows.map(function (r) {
-      return [
-        r.employee_name,
-        r.department,
-        r.report_date,
-        r.day_short,
-        statusLabel(r.status),
-        r.important_issues,
-        r.next_day_plan,
-        r.created_at
-      ];
-    });
-  }
-
+  // Show loading state
   document.getElementById('pageLoader').classList.remove('hidden');
+  
+  // Build filter options - server will handle everything
+  var options = {
+    startDate: document.getElementById('filterStartDate').value || null,
+    endDate: document.getElementById('filterEndDate').value || null,
+    status: document.getElementById('statusFilter').value || null,
+    weekSundayKey: document.getElementById('weekFilter').value || null,
+    employeeName: document.getElementById('searchName').value.trim() || null,
+    reportType: _activeTab
+  };
+  
+  // Single optimized server call - does all filtering, transformation, and export server-side
   google.script.run
     .withSuccessHandler(function (res) {
       document.getElementById('pageLoader').classList.add('hidden');
       if (res && res.success) {
-        showToast('スプレッドシート「' + (res.fileName || title) + '」に ' + dataRows.length + '件書き込みました');
+        showToast('スプレッドシート「' + (res.fileName || 'エクスポート') + '」を作成しました');
         if (res.url) {
           clearExportLink();
           var linkText = _activeTab === 'telework' 
@@ -671,7 +890,7 @@ function exportToSheet() {
       document.getElementById('pageLoader').classList.add('hidden');
       showToast('エラー: ' + ((err && err.message) || '不明'), true);
     })
-    .adminExportToNewSpreadsheet(headers, dataRows, title);
+    .adminExportFiltered(options);
 }
 
 // ── Redmine official logo SVG (inline) ───────────────────────

@@ -7,16 +7,16 @@ function adminExportToNewSpreadsheet(headers, dataRows, sheetTitle) {
 
   // Folder ID for マミヤITソリューションズ/Exported (user provided)
   var folderId = '1Fbl8fcqqAXLIqWQ7UybXD8sGMU3elz6r';
-  var folder = DriveApp.getFolderById(folderId);
 
   var name = sheetTitle || ('エクスポート_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd_HH-mm'));
   var ss = SpreadsheetApp.create(name);
-  var file = DriveApp.getFileById(ss.getId());
-  folder.addFile(file);
-  DriveApp.getRootFolder().removeFile(file); // Remove from My Drive root
+
+  // Move to target folder in one call (avoids addFile + removeFile roundtrip)
+  DriveApp.getFileById(ss.getId()).moveTo(DriveApp.getFolderById(folderId));
 
   var sheet = ss.getActiveSheet();
-  sheet.clear();
+
+  // Write header + data in two range calls (no clear() needed on fresh sheet)
   sheet.getRange(1, 1, 1, headers.length)
        .setValues([headers])
        .setFontWeight('bold')
@@ -26,10 +26,239 @@ function adminExportToNewSpreadsheet(headers, dataRows, sheetTitle) {
   if (dataRows.length > 0) {
     sheet.getRange(2, 1, dataRows.length, headers.length).setValues(dataRows);
   }
-  SpreadsheetApp.flush();
+  // No flush() — GAS batches writes automatically; getUrl() doesn't require it
 
   return { success: true, url: ss.getUrl(), fileId: ss.getId(), fileName: name };
 }
+
+/**
+ * Optimized export function - does all processing server-side
+ * @param {Object} options - Filter options (startDate, endDate, status, weekSundayKey, employeeName, reportType)
+ * @returns {Object} { success, url, fileId, fileName }
+ */
+function adminExportFiltered(options) {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  
+  options = options || {};
+  var reportType = options.reportType || 'telework';
+  
+  // Fetch and filter data server-side (same logic as paginated functions)
+  var reports, users, depts;
+  
+  if (reportType === 'telework') {
+    reports = getReportsInDateRange(options.startDate, options.endDate, options.employeeId);
+    users = getAllUsers();
+    depts = getAllDepartments();
+    
+    var userMap = {};
+    users.forEach(function(u) { userMap[u.id] = u; });
+    var deptMap = {};
+    depts.forEach(function(d) { deptMap[d.id] = d; });
+    
+    // Apply request_date boundary filter
+    if (options.startDate || options.endDate) {
+      var reqStart = options.startDate ? new Date(options.startDate) : null;
+      var reqEnd   = options.endDate   ? new Date(options.endDate)   : null;
+      if (reqEnd) reqEnd.setHours(23, 59, 59, 999);
+      reports = reports.filter(function(r) {
+        if (!r.request_date) return true;
+        var reqDate = new Date(r.request_date);
+        if (reqStart && reqDate < reqStart) return false;
+        if (reqEnd   && reqDate > reqEnd)   return false;
+        return true;
+      });
+    }
+    
+    // Status filter
+    if (options.status) {
+      reports = reports.filter(function(r) { return r.status === options.status; });
+    }
+    
+    // Week filter
+    if (options.weekSundayKey) {
+      var weekSunday = new Date(options.weekSundayKey);
+      var weekSaturday = new Date(weekSunday);
+      weekSaturday.setDate(weekSunday.getDate() + 6);
+      weekSaturday.setHours(23, 59, 59, 999);
+      
+      reports = reports.filter(function(r) {
+        if (!r.request_date) return false;
+        var requestDate = new Date(r.request_date);
+        return requestDate >= weekSunday && requestDate <= weekSaturday;
+      });
+    }
+    
+    // Map with user/dept info
+    var mapped = reports.map(function (r) {
+      var emp = userMap[r.employee_id] || null;
+      var dept = (emp && emp.department_id) ? deptMap[emp.department_id] : null;
+      return {
+        week_title:    r.week_title   || '',
+        employee_name: emp  ? emp.name  : '不明',
+        employee_name_lower: emp ? emp.name.toLowerCase() : '',
+        department:    dept ? dept.name : '未設定',
+        work_type:     r.work_type    || '',
+        request_date:  r.request_date || '',
+        day_short:     r.day_short    || '',
+        status:        r.status       || '',
+        notes:         r.notes        || '',
+        created_at:    r.created_at   || '',
+      };
+    });
+    
+    // Employee name filter
+    if (options.employeeName && options.employeeName.trim()) {
+      var searchTerm = options.employeeName.trim().toLowerCase();
+      mapped = mapped.filter(function(r) {
+        return r.employee_name_lower.indexOf(searchTerm) !== -1;
+      });
+    }
+    
+    // Sort by request_date descending
+    mapped.sort(function(a, b) {
+      return new Date(b.request_date).getTime() - new Date(a.request_date).getTime();
+    });
+    
+    if (mapped.length === 0) {
+      return { error: 'エクスポートする対象がありません' };
+    }
+    
+    // Status label map
+    var statusMap = {
+      approved: '承認済み',
+      submitted: '申請中',
+      draft: '未作成',
+      rejected: '差戻し',
+      reviewed: '照査済',
+    };
+    
+    // Build export data
+    var now = new Date();
+    var stamp = now.getFullYear() +
+      ('0' + (now.getMonth() + 1)).slice(-2) +
+      ('0' + now.getDate()).slice(-2) + '_' +
+      ('0' + now.getHours()).slice(-2) +
+      ('0' + now.getMinutes()).slice(-2);
+    
+    var title = '在宅勤務申請_' + stamp;
+    var headers = ['週', '従業員名', '部署', '勤務種別', '対象日', '曜日', 'ステータス', '作業予定内容', '作成日時'];
+    var dataRows = mapped.map(function(r) {
+      return [
+        r.week_title,
+        r.employee_name,
+        r.department,
+        r.work_type,
+        r.request_date,
+        r.day_short,
+        statusMap[r.status] || r.status || '',
+        r.notes,
+        r.created_at
+      ];
+    });
+    
+    return adminExportToNewSpreadsheet(headers, dataRows, title);
+    
+  } else {
+    // Task reports
+    reports = getTaskReportsInDateRange(options.startDate, options.endDate, options.employeeId);
+    users = getAllUsers();
+    depts = getAllDepartments();
+    
+    var userMap = {};
+    users.forEach(function(u) { userMap[u.id] = u; });
+    var deptMap = {};
+    depts.forEach(function(d) { deptMap[d.id] = d; });
+    
+    // Status filter
+    if (options.status) {
+      reports = reports.filter(function(r) { return r.status === options.status; });
+    }
+    
+    // Week filter
+    if (options.weekSundayKey) {
+      var weekSunday = new Date(options.weekSundayKey);
+      var weekSaturday = new Date(weekSunday);
+      weekSaturday.setDate(weekSunday.getDate() + 6);
+      weekSaturday.setHours(23, 59, 59, 999);
+      
+      reports = reports.filter(function(r) {
+        if (!r.report_date) return false;
+        var reportDate = new Date(r.report_date);
+        return reportDate >= weekSunday && reportDate <= weekSaturday;
+      });
+    }
+    
+    // Map with user/dept info
+    var mapped = reports.map(function (r) {
+      var emp = userMap[r.employee_id] || null;
+      var dept = (emp && emp.department_id) ? deptMap[emp.department_id] : null;
+      return {
+        employee_name: emp  ? emp.name  : '不明',
+        employee_name_lower: emp ? emp.name.toLowerCase() : '',
+        department:    dept ? dept.name : '未設定',
+        report_date:   r.report_date   || '',
+        day_short:     r.day_short     || '',
+        status:        r.status        || '',
+        important_issues: r.important_issues || '',
+        next_day_plan:    r.next_day_plan    || '',
+        created_at:    r.created_at    || '',
+      };
+    });
+    
+    // Employee name filter
+    if (options.employeeName && options.employeeName.trim()) {
+      var searchTerm = options.employeeName.trim().toLowerCase();
+      mapped = mapped.filter(function(r) {
+        return r.employee_name_lower.indexOf(searchTerm) !== -1;
+      });
+    }
+    
+    // Sort by report_date descending
+    mapped.sort(function(a, b) {
+      return new Date(b.report_date).getTime() - new Date(a.report_date).getTime();
+    });
+    
+    if (mapped.length === 0) {
+      return { error: 'エクスポートする対象がありません' };
+    }
+    
+    // Status label map
+    var statusMap = {
+      approved: '承認済み',
+      submitted: '申請中',
+      draft: '未作成',
+      rejected: '差戻し',
+      reviewed: '照査済',
+    };
+    
+    // Build export data
+    var now = new Date();
+    var stamp = now.getFullYear() +
+      ('0' + (now.getMonth() + 1)).slice(-2) +
+      ('0' + now.getDate()).slice(-2) + '_' +
+      ('0' + now.getHours()).slice(-2) +
+      ('0' + now.getMinutes()).slice(-2);
+    
+    var title = '日報報告_' + stamp;
+    var headers = ['従業員名', '部署', '対象日', '曜日', 'ステータス', '作業報告', '翌日の計画', '作成日時'];
+    var dataRows = mapped.map(function(r) {
+      return [
+        r.employee_name,
+        r.department,
+        r.report_date,
+        r.day_short,
+        statusMap[r.status] || r.status || '',
+        r.important_issues,
+        r.next_day_plan,
+        r.created_at
+      ];
+    });
+    
+    return adminExportToNewSpreadsheet(headers, dataRows, title);
+  }
+}
+
 // ============================================================
 //  Sheets.gs — Google Sheets data layer
 //
@@ -127,19 +356,75 @@ function _appendRow(sheetName, obj, headers) {
   }));
 }
 
+/**
+ * Batch update row - uses single setValues() call instead of multiple setValue()
+ * @param {string} sheetName - Sheet name
+ * @param {string} id - Row ID to update
+ * @param {Object} updates - Key-value pairs to update
+ * @param {Array} headers - Column headers array
+ * @returns {boolean} True if row was updated
+ */
 function _updateRow(sheetName, id, updates, headers) {
   var sheet = getSheet(sheetName);
   var data  = sheet.getDataRange().getValues();
   var idCol = headers.indexOf('id');
+  
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idCol]) === String(id)) {
+      // Build new row data by applying updates to existing row
+      var newRow = data[i].slice(); // Clone the row
       headers.forEach(function (h, c) {
-        if (updates[h] !== undefined) sheet.getRange(i + 1, c + 1).setValue(updates[h]);
+        if (updates[h] !== undefined) {
+          newRow[c] = updates[h];
+        }
       });
+      // Single batch write instead of multiple setValue calls
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([newRow]);
       return true;
     }
   }
   return false;
+}
+
+/**
+ * Batch update multiple rows at once - for bulk operations
+ * @param {string} sheetName - Sheet name
+ * @param {Array} updates - Array of {id: string, data: Object} to update
+ * @param {Array} headers - Column headers array
+ * @returns {number} Count of rows updated
+ */
+function _updateRowsBatch(sheetName, updates, headers) {
+  if (!updates || updates.length === 0) return 0;
+  
+  var sheet = getSheet(sheetName);
+  var data  = sheet.getDataRange().getValues();
+  var idCol = headers.indexOf('id');
+  
+  // Build a map of id -> row index for O(1) lookups
+  var idToRow = {};
+  for (var i = 1; i < data.length; i++) {
+    idToRow[String(data[i][idCol])] = i;
+  }
+  
+  var updated = 0;
+  updates.forEach(function(upd) {
+    var rowIdx = idToRow[String(upd.id)];
+    if (rowIdx !== undefined) {
+      headers.forEach(function(h, c) {
+        if (upd.data[h] !== undefined) {
+          data[rowIdx][c] = upd.data[h];
+        }
+      });
+      updated++;
+    }
+  });
+  
+  // Write all data back in single call if any updates were made
+  if (updated > 0) {
+    sheet.getRange(1, 1, data.length, headers.length).setValues(data);
+  }
+  
+  return updated;
 }
 
 function _uuid()  { return Utilities.getUuid(); }
@@ -148,6 +433,452 @@ function _now()   {
   var now = new Date();
   // Format as ISO 8601 with JST timezone offset (+09:00)
   return Utilities.formatDate(now, 'Asia/Tokyo', "yyyy-MM-dd'T'HH:mm:ss'+09:00'");
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PERFORMANCE OPTIMIZATION: Caching Layer
+//  - 5-minute cache TTL for frequently accessed data
+//  - O(1) lookup maps for users and departments
+//  - Cache invalidation on data changes
+// ══════════════════════════════════════════════════════════════
+
+var CACHE_TTL = 300; // 5 minutes in seconds
+
+// Cache keys
+var CACHE_KEY_USERS       = 'cache_all_users';
+var CACHE_KEY_DEPARTMENTS = 'cache_all_departments';
+var CACHE_KEY_REPORTS     = 'cache_all_reports';
+var CACHE_KEY_TASK_REPORTS = 'cache_all_task_reports';
+var CACHE_KEY_APPROVALS   = 'cache_all_approvals';
+
+/**
+ * Generic caching helper - retrieves from cache or fetches fresh data
+ * @param {string} cacheKey - Unique cache key
+ * @param {Function} fetchFunction - Function to call if cache miss
+ * @param {number} ttl - Time-to-live in seconds (default: CACHE_TTL)
+ * @returns {Array|Object} Cached or fresh data
+ */
+function _getCachedData(cacheKey, fetchFunction, ttl) {
+  ttl = ttl || CACHE_TTL;
+  var cache = CacheService.getScriptCache();
+  
+  try {
+    var cached = cache.get(cacheKey);
+    if (cached) {
+      Logger.log('Cache HIT: ' + cacheKey);
+      return JSON.parse(cached);
+    }
+  } catch (e) {
+    Logger.log('Cache parse error for ' + cacheKey + ': ' + e.toString());
+  }
+  
+  Logger.log('Cache MISS: ' + cacheKey + ' - fetching fresh data');
+  var data = fetchFunction();
+  
+  // Cache only if data is small enough (< 100KB - CacheService limit per key)
+  try {
+    var jsonStr = JSON.stringify(data);
+    if (jsonStr.length < 100000) {
+      cache.put(cacheKey, jsonStr, ttl);
+      Logger.log('Cached ' + cacheKey + ' (' + jsonStr.length + ' bytes)');
+    } else {
+      Logger.log('Data too large to cache: ' + cacheKey + ' (' + jsonStr.length + ' bytes)');
+    }
+  } catch (e) {
+    Logger.log('Cache put error for ' + cacheKey + ': ' + e.toString());
+  }
+  
+  return data;
+}
+
+/**
+ * Invalidate specific cache keys
+ * @param {string|Array} keys - Cache key(s) to invalidate
+ */
+function _invalidateCache(keys) {
+  var cache = CacheService.getScriptCache();
+  if (Array.isArray(keys)) {
+    cache.removeAll(keys);
+    Logger.log('Invalidated cache keys: ' + keys.join(', '));
+  } else {
+    cache.remove(keys);
+    Logger.log('Invalidated cache key: ' + keys);
+  }
+  // Clear ALL lookup maps to ensure fresh data on next read
+  _clearAllLookupMaps();
+}
+
+/**
+ * Clear all in-memory lookup maps
+ */
+function _clearAllLookupMaps() {
+  _userByIdMap = null;
+  _userByEmailMap = null;
+  _deptByIdMap = null;
+  _approvalsByReportMap = null;
+}
+
+/**
+ * Invalidate all data caches (call after bulk operations)
+ */
+function invalidateAllCaches() {
+  _invalidateCache([
+    CACHE_KEY_USERS,
+    CACHE_KEY_DEPARTMENTS,
+    CACHE_KEY_REPORTS,
+    CACHE_KEY_TASK_REPORTS,
+    CACHE_KEY_APPROVALS
+  ]);
+}
+
+// ── Lookup Maps for O(1) Access ───────────────────────────────
+var _userByIdMap = null;
+var _userByEmailMap = null;
+var _deptByIdMap = null;
+var _approvalsByReportMap = null;
+
+/**
+ * Build user lookup maps from cached data
+ */
+function _buildUserMaps() {
+  if (_userByIdMap !== null) return; // Already built
+  
+  var users = getAllUsers();
+  _userByIdMap = {};
+  _userByEmailMap = {};
+  
+  users.forEach(function(u) {
+    _userByIdMap[u.id] = u;
+    if (u.email) {
+      _userByEmailMap[u.email.toLowerCase()] = u;
+    }
+  });
+  
+  Logger.log('Built user lookup maps: ' + users.length + ' users indexed');
+}
+
+/**
+ * Build department lookup map from cached data
+ */
+function _buildDeptMap() {
+  if (_deptByIdMap !== null) return; // Already built
+  
+  var depts = getAllDepartments();
+  _deptByIdMap = {};
+  
+  depts.forEach(function(d) {
+    _deptByIdMap[d.id] = d;
+  });
+  
+  Logger.log('Built department lookup map: ' + depts.length + ' departments indexed');
+}
+
+/**
+ * Get user by ID - O(1) lookup using map
+ */
+function getUserByIdFast(id) {
+  _buildUserMaps();
+  return _userByIdMap[id] || null;
+}
+
+/**
+ * Get user by email - O(1) lookup using map
+ */
+function getUserByEmailFast(email) {
+  if (!email) return null;
+  _buildUserMaps();
+  return _userByEmailMap[email.toLowerCase()] || null;
+}
+
+/**
+ * Get department by ID - O(1) lookup using map
+ */
+function getDepartmentByIdFast(id) {
+  _buildDeptMap();
+  return _deptByIdMap[id] || null;
+}
+
+/**
+ * Test caching performance - run from GAS editor
+ */
+function testCachingPerformance() {
+  // Clear all caches first
+  invalidateAllCaches();
+  
+  // First call - should be cache MISS
+  var start1 = new Date();
+  var users1 = getAllUsers();
+  var time1 = new Date() - start1;
+  Logger.log('First call (cache MISS): ' + time1 + 'ms, ' + users1.length + ' users');
+  
+  // Second call - should be cache HIT
+  var start2 = new Date();
+  var users2 = getAllUsers();
+  var time2 = new Date() - start2;
+  Logger.log('Second call (cache HIT): ' + time2 + 'ms, ' + users2.length + ' users');
+  
+  // Test fast lookup
+  if (users1.length > 0) {
+    var testUser = users1[0];
+    var start3 = new Date();
+    var found = getUserByIdFast(testUser.id);
+    var time3 = new Date() - start3;
+    Logger.log('getUserByIdFast (O(1) lookup): ' + time3 + 'ms, found: ' + (found ? found.name : 'null'));
+  }
+  
+  Logger.log('═══════════════════════════════════════');
+  Logger.log('Performance improvement: ' + Math.round((1 - time2/time1) * 100) + '% faster on cache hit');
+  
+  return { firstCall: time1, secondCall: time2, improvement: Math.round((1 - time2/time1) * 100) + '%' };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PHASE 2: Approval Lookup Map for O(1) Access by Report ID
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Build approval lookup map grouped by report_id for O(1) access
+ * @returns {Object} Map of report_id -> array of approvals
+ */
+function _buildApprovalMap() {
+  if (_approvalsByReportMap !== null) return _approvalsByReportMap;
+  
+  var approvals = getAllApprovals();
+  _approvalsByReportMap = {};
+  
+  approvals.forEach(function(a) {
+    if (!_approvalsByReportMap[a.report_id]) {
+      _approvalsByReportMap[a.report_id] = [];
+    }
+    _approvalsByReportMap[a.report_id].push(a);
+  });
+  
+  Logger.log('Built approval lookup map: ' + approvals.length + ' approvals indexed');
+  return _approvalsByReportMap;
+}
+
+/**
+ * Get approvals by report ID - O(1) lookup using map
+ * @param {string} reportId - Report ID
+ * @returns {Array} Array of approvals for this report
+ */
+function getApprovalsByReportFast(reportId) {
+  _buildApprovalMap();
+  return _approvalsByReportMap[reportId] || [];
+}
+
+/**
+ * Invalidate approval map (call after approval changes)
+ */
+function _invalidateApprovalMap() {
+  _approvalsByReportMap = null;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PHASE 3: Concurrent Access Protection (LockService)
+//  - Prevents race conditions during concurrent writes
+//  - 30-second lock timeout for safety
+// ══════════════════════════════════════════════════════════════
+
+var LOCK_TIMEOUT_MS = 30000; // 30 seconds
+
+/**
+ * Execute a function with exclusive lock protection
+ * @param {string} lockName - Unique identifier for this lock scope
+ * @param {Function} fn - Function to execute with lock
+ * @returns {*} Return value of fn, or error object if lock fails
+ */
+function _withLock(lockName, fn) {
+  var lock = LockService.getScriptLock();
+  
+  try {
+    // Wait up to 30 seconds to acquire lock
+    var acquired = lock.tryLock(LOCK_TIMEOUT_MS);
+    if (!acquired) {
+      Logger.log('Failed to acquire lock: ' + lockName);
+      return { error: 'サーバーが混み合っています。しばらく待ってから再試行してください。' };
+    }
+    
+    Logger.log('Lock acquired: ' + lockName);
+    var result = fn();
+    return result;
+    
+  } catch (e) {
+    Logger.log('Error in locked operation ' + lockName + ': ' + e.toString());
+    throw e;
+  } finally {
+    try {
+      lock.releaseLock();
+      Logger.log('Lock released: ' + lockName);
+    } catch (e) {
+      // Lock may already be released if timeout occurred
+      Logger.log('Lock release warning: ' + e.toString());
+    }
+  }
+}
+
+/**
+ * Check for duplicate submission (prevents double-submit)
+ * @param {string} sheetName - Sheet to check
+ * @param {Object} criteria - Key-value pairs to match
+ * @param {Array} headers - Column headers
+ * @param {Array} excludeStatuses - Statuses to exclude from duplicate check
+ * @returns {Object|null} Existing record if duplicate found, null otherwise
+ */
+function _checkDuplicateSubmission(sheetName, criteria, headers, excludeStatuses) {
+  excludeStatuses = excludeStatuses || ['draft', 'rejected'];
+  var sheet = getSheet(sheetName);
+  var data = sheet.getDataRange().getValues();
+  
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var matches = true;
+    var status = null;
+    
+    // Check all criteria match
+    for (var key in criteria) {
+      var colIdx = headers.indexOf(key);
+      if (colIdx === -1) continue;
+      
+      var cellValue = row[colIdx];
+      // Handle date columns
+      if (cellValue instanceof Date) {
+        cellValue = _dateStr(cellValue);
+      }
+      
+      if (String(cellValue) !== String(criteria[key])) {
+        matches = false;
+        break;
+      }
+    }
+    
+    if (matches) {
+      var statusCol = headers.indexOf('status');
+      if (statusCol !== -1) {
+        status = String(row[statusCol]);
+        // If status is in exclude list, don't count as duplicate
+        if (excludeStatuses.indexOf(status) !== -1) {
+          continue;
+        }
+      }
+      
+      // Found a duplicate - return the record
+      var record = {};
+      headers.forEach(function(h, idx) {
+        record[h] = row[idx];
+      });
+      return record;
+    }
+  }
+  
+  return null;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PHASE 4: Data Volume Management
+//  - Date-range filtering for reports (avoids loading entire history)
+//  - Pagination for large datasets
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Default date range - last 3 months for performance
+ */
+var DEFAULT_MONTHS_BACK = 1;
+
+/**
+ * Get reports within a date range (efficient for large datasets)
+ * @param {string} startDate - Start date (YYYY-MM-DD) or null for 3 months ago
+ * @param {string} endDate - End date (YYYY-MM-DD) or null for today
+ * @param {string} employeeId - Optional employee ID filter
+ * @returns {Array} Filtered reports
+ */
+function getReportsInDateRange(startDate, endDate, employeeId) {
+  // Default to last 3 months if no date range specified
+  if (!endDate) {
+    endDate = _dateStr(new Date());
+  }
+  if (!startDate) {
+    var d = new Date();
+    d.setMonth(d.getMonth() - DEFAULT_MONTHS_BACK);
+    startDate = _dateStr(d);
+  }
+  
+  var startTime = new Date(startDate).getTime();
+  var endTime = new Date(endDate).getTime() + 86400000; // Include end date
+  
+  var reports = getAllReports();
+  
+  return reports.filter(function(r) {
+    // Filter by date range (use start_date of the report)
+    var reportDate = new Date(r.start_date).getTime();
+    if (reportDate < startTime || reportDate > endTime) return false;
+    
+    // Filter by employee if specified
+    if (employeeId && r.employee_id !== employeeId) return false;
+    
+    return true;
+  });
+}
+
+/**
+ * Get task reports within a date range
+ * @param {string} startDate - Start date (YYYY-MM-DD) or null for 3 months ago
+ * @param {string} endDate - End date (YYYY-MM-DD) or null for today
+ * @param {string} employeeId - Optional employee ID filter
+ * @returns {Array} Filtered task reports
+ */
+function getTaskReportsInDateRange(startDate, endDate, employeeId) {
+  // Default to last 3 months if no date range specified
+  if (!endDate) {
+    endDate = _dateStr(new Date());
+  }
+  if (!startDate) {
+    var d = new Date();
+    d.setMonth(d.getMonth() - DEFAULT_MONTHS_BACK);
+    startDate = _dateStr(d);
+  }
+  
+  var startTime = new Date(startDate).getTime();
+  var endTime = new Date(endDate).getTime() + 86400000; // Include end date
+  
+  var reports = getAllTaskReports();
+  
+  return reports.filter(function(r) {
+    // Filter by date range
+    var reportDate = new Date(r.report_date).getTime();
+    if (reportDate < startTime || reportDate > endTime) return false;
+    
+    // Filter by employee if specified
+    if (employeeId && r.employee_id !== employeeId) return false;
+    
+    return true;
+  });
+}
+
+/**
+ * Get paginated data from an array
+ * @param {Array} data - Full dataset
+ * @param {number} page - Page number (1-indexed)
+ * @param {number} pageSize - Items per page (default: 50)
+ * @returns {Object} { items: Array, page: number, pageSize: number, totalPages: number, totalItems: number }
+ */
+function _paginate(data, page, pageSize) {
+  page = page || 1;
+  pageSize = pageSize || 50;
+  
+  var totalItems = data.length;
+  var totalPages = Math.ceil(totalItems / pageSize);
+  var startIdx = (page - 1) * pageSize;
+  var items = data.slice(startIdx, startIdx + pageSize);
+  
+  return {
+    items: items,
+    page: page,
+    pageSize: pageSize,
+    totalPages: totalPages,
+    totalItems: totalItems,
+    hasMore: page < totalPages
+  };
 }
 
 // Calculate week title like "第13週" (Sunday-based week)
@@ -178,10 +909,12 @@ function _getWeekTitle(dateStr) {
 var DEPT_H = ['id','name','parent_department','created_at'];
 
 function getAllDepartments() {
-  return _sheetToObjects(getSheet(SHEET_DEPARTMENTS));
+  return _getCachedData(CACHE_KEY_DEPARTMENTS, function() {
+    return _sheetToObjects(getSheet(SHEET_DEPARTMENTS));
+  });
 }
 function getDepartmentById(id) {
-  return getAllDepartments().find(function (d) { return d.id === id; }) || null;
+  return getDepartmentByIdFast(id);
 }
 
 // Filter department IDs to return only CHILD departments (exclude parent departments)
@@ -199,6 +932,7 @@ function getChildDepartmentsOnly(departmentIds) {
 function createDepartment(name, parentDepartmentId) {
   var d = { id: _uuid(), name: name, parent_department: parentDepartmentId || '', created_at: _now() };
   _appendRow(SHEET_DEPARTMENTS, d, DEPT_H);
+  _invalidateCache(CACHE_KEY_DEPARTMENTS);
   return d;
 }
 
@@ -206,18 +940,18 @@ function createDepartment(name, parentDepartmentId) {
 var USER_H = ['id','email','password_hash','name','role','department_id','is_active','created_at','updated_at'];
 
 function getAllUsers() {
-  return _sheetToObjects(getSheet(SHEET_USERS)).map(function (u) {
-    u.is_active = (u.is_active === true || u.is_active === 'TRUE' || u.is_active === 1);
-    return u;
+  return _getCachedData(CACHE_KEY_USERS, function() {
+    return _sheetToObjects(getSheet(SHEET_USERS)).map(function (u) {
+      u.is_active = (u.is_active === true || u.is_active === 'TRUE' || u.is_active === 1);
+      return u;
+    });
   });
 }
 function getUserByEmail(email) {
-  return getAllUsers().find(function (u) {
-    return String(u.email).toLowerCase() === String(email).toLowerCase();
-  }) || null;
+  return getUserByEmailFast(email);
 }
 function getUserById(id) {
-  return getAllUsers().find(function (u) { return u.id === id; }) || null;
+  return getUserByIdFast(id);
 }
 function getUsersByDepartment(departmentId) {
   if (!departmentId) return [];
@@ -282,17 +1016,22 @@ function createUser(name, email, role, departmentIds, plainPassword) {
     updated_at:    _now(),
   };
   _appendRow(SHEET_USERS, u, USER_H);
+  _invalidateCache(CACHE_KEY_USERS);
   return u;
 }
 function setUserActive(userId, active) {
-  return _updateRow(SHEET_USERS, userId, { is_active: active, updated_at: _now() }, USER_H);
+  var result = _updateRow(SHEET_USERS, userId, { is_active: active, updated_at: _now() }, USER_H);
+  _invalidateCache(CACHE_KEY_USERS);
+  return result;
 }
 
 // ── Reports ──────────────────────────────────────────────────
 var REPORT_H = ['id','employee_id','report_type','start_date','end_date','request_date','week_title','work_type','day_short','notes','redmine_tasks','status','created_at','updated_at'];
 
 function getAllReports() {
-  return _sheetToObjects(getSheet(SHEET_REPORTS));
+  return _getCachedData(CACHE_KEY_REPORTS, function() {
+    return _sheetToObjects(getSheet(SHEET_REPORTS));
+  });
 }
 function getReportsByEmployee(employeeId) {
   return getAllReports().filter(function (r) { return r.employee_id === employeeId; });
@@ -318,20 +1057,26 @@ function createReport(employeeId, reportType, startDate, endDate, requestDate, w
     updated_at:  _now(),
   };
   _appendRow(SHEET_REPORTS, r, REPORT_H);
+  _invalidateCache(CACHE_KEY_REPORTS);
   return r;
 }
 function updateReportStatus(reportId, status) {
-  return _updateRow(SHEET_REPORTS, reportId, { status: status, updated_at: _now() }, REPORT_H);
+  var result = _updateRow(SHEET_REPORTS, reportId, { status: status, updated_at: _now() }, REPORT_H);
+  _invalidateCache(CACHE_KEY_REPORTS);
+  return result;
 }
 
 // ── Approvals ────────────────────────────────────────────────
 var APPROVAL_H = ['id','report_id','approver_id','level','decision','comment','decided_at','created_at'];
 
 function getAllApprovals() {
-  return _sheetToObjects(getSheet(SHEET_APPROVALS));
+  return _getCachedData(CACHE_KEY_APPROVALS, function() {
+    return _sheetToObjects(getSheet(SHEET_APPROVALS));
+  });
 }
 function getApprovalsByReport(reportId) {
-  return getAllApprovals().filter(function (a) { return a.report_id === reportId; });
+  // Use O(1) lookup map instead of filtering all approvals
+  return getApprovalsByReportFast(reportId);
 }
 function createApproval(reportId, approverId, level) {
   var a = {
@@ -345,6 +1090,8 @@ function createApproval(reportId, approverId, level) {
     created_at:  _now(),
   };
   _appendRow(SHEET_APPROVALS, a, APPROVAL_H);
+  _invalidateCache(CACHE_KEY_APPROVALS);
+  _invalidateApprovalMap();
   return a;
 }
 function decideApproval(reportId, level, decision, comment) {
@@ -353,16 +1100,22 @@ function decideApproval(reportId, level, decision, comment) {
     return a.report_id === reportId && String(a.level) === String(level);
   });
   if (target) {
-    return _updateRow(SHEET_APPROVALS, target.id, {
+    var result = _updateRow(SHEET_APPROVALS, target.id, {
       decision: decision, comment: comment || '', decided_at: _now(),
     }, APPROVAL_H);
+    _invalidateCache(CACHE_KEY_APPROVALS);
+    _invalidateApprovalMap();
+    return result;
   }
   // Create if missing
   var approverId = getCurrentUser() ? getCurrentUser().id : '';
   var a = createApproval(reportId, approverId, level);
-  return _updateRow(SHEET_APPROVALS, a.id, {
+  var result = _updateRow(SHEET_APPROVALS, a.id, {
     decision: decision, comment: comment || '', decided_at: _now(),
   }, APPROVAL_H);
+  _invalidateCache(CACHE_KEY_APPROVALS);
+  _invalidateApprovalMap();
+  return result;
 }
 
 // ── Client-facing API functions ───────────────────────────────
@@ -641,6 +1394,7 @@ function saveDayDraft(dayPayload) {
       updated_at:    _now(),
     };
     _updateRow(SHEET_REPORTS, existingId, updates, REPORT_H);
+    _invalidateCache(CACHE_KEY_REPORTS);
     return { success: true, status: 'draft', id: existingId };
   } else {
     // Create a new draft record
@@ -788,6 +1542,9 @@ function submitWeekReport(weekData) {
     // Skip: rejected records, already submitted, or no record at all
   });
 
+  // Invalidate cache after all updates
+  _invalidateCache(CACHE_KEY_REPORTS);
+  
   return { success: true, reports: createdReports };
 }
 
@@ -1070,6 +1827,7 @@ function updateEmployee(data) {
   var success = _updateRow(SHEET_USERS, data.id, updates, USER_H);
   
   if (success) {
+    _invalidateCache(CACHE_KEY_USERS);
     return { success: true };
   } else {
     return { error: 'Failed to update employee' };
@@ -1124,7 +1882,9 @@ function getApproveDepartments() {
 var TASK_REPORT_H = ['id','employee_id','report_date','day_short','important_issues','next_day_plan','redmine_tasks','status','created_at','updated_at'];
 
 function getAllTaskReports() {
-  return _sheetToObjects(getSheet(SHEET_TASK_REPORTS));
+  return _getCachedData(CACHE_KEY_TASK_REPORTS, function() {
+    return _sheetToObjects(getSheet(SHEET_TASK_REPORTS));
+  });
 }
 function getTaskReportsByEmployee(employeeId) {
   return getAllTaskReports().filter(function (r) { return r.employee_id === employeeId; });
@@ -1192,6 +1952,7 @@ function saveTaskReportDraft(payload) {
 
   if (existingRow > -1) {
     _updateRow(SHEET_TASK_REPORTS, existingId, updates, TASK_REPORT_H);
+    _invalidateCache(CACHE_KEY_TASK_REPORTS);
     return { success: true, status: 'draft', id: existingId };
   } else {
     var r = {
@@ -1207,15 +1968,33 @@ function saveTaskReportDraft(payload) {
       updated_at:       _now(),
     };
     _appendRow(SHEET_TASK_REPORTS, r, TASK_REPORT_H);
+    _invalidateCache(CACHE_KEY_TASK_REPORTS);
     return { success: true, status: 'draft', id: r.id };
   }
 }
 
 // Submit a single day task report (individual only, no combined)
 function submitTaskReport(payload) {
+  return _withLock('submitTaskReport', function() {
+    return _submitTaskReportImpl(payload);
+  });
+}
+
+function _submitTaskReportImpl(payload) {
   var user = getCurrentUser();
   if (!user) return { error: 'Unauthorized' };
   if (!payload || !payload.date) return { error: 'データが不足しています' };
+
+  // Check for duplicate submission BEFORE proceeding
+  var duplicate = _checkDuplicateSubmission(
+    SHEET_TASK_REPORTS,
+    { employee_id: user.id, report_date: payload.date },
+    TASK_REPORT_H,
+    ['draft', 'rejected']
+  );
+  if (duplicate) {
+    return { error: 'この日報は既に申請済みです', status: duplicate.status };
+  }
 
   var sheet = getSheet(SHEET_TASK_REPORTS);
   var data  = sheet.getDataRange().getValues();
@@ -1243,6 +2022,7 @@ function submitTaskReport(payload) {
   }
 
   _updateRow(SHEET_TASK_REPORTS, existingId, { status: 'submitted', updated_at: _now() }, TASK_REPORT_H);
+  _invalidateCache(CACHE_KEY_TASK_REPORTS);
 
   // Create approval records
   var emp = getUserById(user.id);
@@ -1324,102 +2104,112 @@ function submitTaskReport(payload) {
 
 // Delete a telework report day (user can only delete their own draft/rejected reports)
 function deleteTeleworkDay(payload) {
-  var user = getCurrentUser();
-  if (!user) return { error: 'Unauthorized' };
-  if (!payload || !payload.date || !payload.startDate || !payload.endDate) {
-    return { error: 'データが不足しています' };
-  }
+  return _withLock('deleteTeleworkDay', function() {
+    var user = getCurrentUser();
+    if (!user) return { error: 'Unauthorized' };
+    if (!payload || !payload.date || !payload.startDate || !payload.endDate) {
+      return { error: 'データが不足しています' };
+    }
 
-  var sheet = getSheet(SHEET_REPORTS);
-  var data  = sheet.getDataRange().getValues();
-  var empCol    = REPORT_H.indexOf('employee_id');
-  var reqCol    = REPORT_H.indexOf('request_date');
-  var startCol  = REPORT_H.indexOf('start_date');
-  var endCol    = REPORT_H.indexOf('end_date');
-  var statusCol = REPORT_H.indexOf('status');
-  var idCol     = REPORT_H.indexOf('id');
+    var sheet = getSheet(SHEET_REPORTS);
+    var data  = sheet.getDataRange().getValues();
+    var empCol    = REPORT_H.indexOf('employee_id');
+    var reqCol    = REPORT_H.indexOf('request_date');
+    var startCol  = REPORT_H.indexOf('start_date');
+    var endCol    = REPORT_H.indexOf('end_date');
+    var statusCol = REPORT_H.indexOf('status');
+    var idCol     = REPORT_H.indexOf('id');
 
-  // Find the record for this employee + this exact day
-  var targetRow = -1;
-  var targetId = null;
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][empCol])        === String(user.id) &&
-        _dateStr(data[i][reqCol])      === String(payload.date) &&
-        _dateStr(data[i][startCol])    === String(payload.startDate) &&
-        _dateStr(data[i][endCol])      === String(payload.endDate)) {
-      var status = String(data[i][statusCol]);
-      // Only allow deletion of draft or rejected reports
-      if (status === 'draft' || status === 'rejected') {
-        targetRow = i;
-        targetId = String(data[i][idCol]);
-        break;
-      } else {
-        return { error: 'このステータスの申請は削除できません: ' + status };
+    // Find the record for this employee + this exact day
+    var targetRow = -1;
+    var targetId = null;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][empCol])        === String(user.id) &&
+          _dateStr(data[i][reqCol])      === String(payload.date) &&
+          _dateStr(data[i][startCol])    === String(payload.startDate) &&
+          _dateStr(data[i][endCol])      === String(payload.endDate)) {
+        var status = String(data[i][statusCol]);
+        // Only allow deletion of draft or rejected reports
+        if (status === 'draft' || status === 'rejected') {
+          targetRow = i;
+          targetId = String(data[i][idCol]);
+          break;
+        } else {
+          return { error: 'このステータスの申請は削除できません: ' + status };
+        }
       }
     }
-  }
 
-  if (targetRow === -1) {
-    return { error: 'レコードが見つかりません' };
-  }
+    if (targetRow === -1) {
+      return { error: 'レコードが見つかりません' };
+    }
 
-  // Delete the row
-  sheet.deleteRow(targetRow + 1); // +1 because sheet rows are 1-indexed
-  
-  // Also delete associated approvals
-  var approvals = getApprovalsByReport(targetId);
-  approvals.forEach(function(approval) {
-    _deleteRowById(SHEET_APPROVALS, approval.id);
+    // Delete the row
+    sheet.deleteRow(targetRow + 1); // +1 because sheet rows are 1-indexed
+    
+    // Also delete associated approvals
+    var approvals = getApprovalsByReport(targetId);
+    approvals.forEach(function(approval) {
+      _deleteRowById(SHEET_APPROVALS, approval.id);
+    });
+
+    _invalidateCache(CACHE_KEY_REPORTS);
+    _invalidateCache(CACHE_KEY_APPROVALS);
+    _invalidateApprovalMap();
+    return { success: true, message: '削除しました' };
   });
-
-  return { success: true, message: '削除しました' };
 }
 
 // Delete a task report day (user can only delete their own draft/rejected reports)
 function deleteTaskDay(dateStr) {
-  var user = getCurrentUser();
-  if (!user) return { error: 'Unauthorized' };
-  if (!dateStr) return { error: 'データが不足しています' };
+  return _withLock('deleteTaskDay', function() {
+    var user = getCurrentUser();
+    if (!user) return { error: 'Unauthorized' };
+    if (!dateStr) return { error: 'データが不足しています' };
 
-  var sheet = getSheet(SHEET_TASK_REPORTS);
-  var data  = sheet.getDataRange().getValues();
-  var empCol  = TASK_REPORT_H.indexOf('employee_id');
-  var dateCol = TASK_REPORT_H.indexOf('report_date');
-  var statusCol = TASK_REPORT_H.indexOf('status');
-  var idCol = TASK_REPORT_H.indexOf('id');
+    var sheet = getSheet(SHEET_TASK_REPORTS);
+    var data  = sheet.getDataRange().getValues();
+    var empCol  = TASK_REPORT_H.indexOf('employee_id');
+    var dateCol = TASK_REPORT_H.indexOf('report_date');
+    var statusCol = TASK_REPORT_H.indexOf('status');
+    var idCol = TASK_REPORT_H.indexOf('id');
 
-  // Find the record for this employee + this date
-  var targetRow = -1;
-  var targetId = null;
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][empCol]) === String(user.id) &&
-        _dateStr(data[i][dateCol]) === String(dateStr)) {
-      var status = String(data[i][statusCol]);
-      // Only allow deletion of draft or rejected reports
-      if (status === 'draft' || status === 'rejected') {
-        targetRow = i;
-        targetId = String(data[i][idCol]);
-        break;
-      } else {
-        return { error: 'このステータスの日報は削除できません: ' + status };
+    // Find the record for this employee + this date
+    var targetRow = -1;
+    var targetId = null;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][empCol]) === String(user.id) &&
+          _dateStr(data[i][dateCol]) === String(dateStr)) {
+        var status = String(data[i][statusCol]);
+        // Only allow deletion of draft or rejected reports
+        if (status === 'draft' || status === 'rejected') {
+          targetRow = i;
+          targetId = String(data[i][idCol]);
+          break;
+        } else {
+          return { error: 'このステータスの日報は削除できません: ' + status };
+        }
       }
     }
-  }
 
-  if (targetRow === -1) {
-    return { error: 'レコードが見つかりません' };
-  }
+    if (targetRow === -1) {
+      return { error: 'レコードが見つかりません' };
+    }
 
-  // Delete the row
-  sheet.deleteRow(targetRow + 1); // +1 because sheet rows are 1-indexed
-  
-  // Also delete associated approvals
-  var approvals = getApprovalsByReport(targetId);
-  approvals.forEach(function(approval) {
-    _deleteRowById(SHEET_APPROVALS, approval.id);
+    // Delete the row
+    sheet.deleteRow(targetRow + 1); // +1 because sheet rows are 1-indexed
+    
+    // Also delete associated approvals
+    var approvals = getApprovalsByReport(targetId);
+    approvals.forEach(function(approval) {
+      _deleteRowById(SHEET_APPROVALS, approval.id);
+    });
+
+    _invalidateCache(CACHE_KEY_TASK_REPORTS);
+    _invalidateCache(CACHE_KEY_APPROVALS);
+    _invalidateApprovalMap();
+    return { success: true, message: '削除しました' };
   });
-
-  return { success: true, message: '削除しました' };
 }
 
 // Get pending task reports for reviewers/managers
@@ -1514,20 +2304,27 @@ function getPendingTaskReports() {
 
 // Review a task report (first approval step)
 function reviewTaskReportAction(reportId, comment) {
-  var user = getCurrentUser();
-  if (!user) return { error: 'Unauthorized' };
-  
-  var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
-  if (!report) return { error: 'レポートが見つかりません' };
-  
-  // Only reviewers, managers, and admins can review
-  if (user.role !== 'reviewer' && user.role !== 'manager' && user.role !== 'admin') {
-    return { error: '照査権限がありません' };
-  }
-  
-  var level = 1; // Review level
-  decideApproval(reportId, level, 'approved', comment);
-  _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'reviewed', updated_at: _now() }, TASK_REPORT_H);
+  return _withLock('reviewTaskReport_' + reportId, function() {
+    var user = getCurrentUser();
+    if (!user) return { error: 'Unauthorized' };
+    
+    var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
+    if (!report) return { error: 'レポートが見つかりません' };
+    
+    // Check if already reviewed (prevent duplicate action)
+    if (report.status !== 'submitted') {
+      return { error: 'この日報は既に処理済みです', status: report.status };
+    }
+    
+    // Only reviewers, managers, and admins can review
+    if (user.role !== 'reviewer' && user.role !== 'manager' && user.role !== 'admin') {
+      return { error: '照査権限がありません' };
+    }
+    
+    var level = 1; // Review level
+    decideApproval(reportId, level, 'approved', comment);
+    _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'reviewed', updated_at: _now() }, TASK_REPORT_H);
+    _invalidateCache(CACHE_KEY_TASK_REPORTS);
   
   // Send notification
   var employee = getUserById(report.employee_id);
@@ -1548,126 +2345,102 @@ function reviewTaskReportAction(reportId, comment) {
     }
   }
   
-  return { success: true };
-}
-
-// Approve a task report (final approval step)
-// Review a task report (first approval step)
-function reviewTaskReportAction(reportId, comment) {
-  var user = getCurrentUser();
-  if (!user) return { error: 'Unauthorized' };
-  
-  var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
-  if (!report) return { error: 'レポートが見つかりません' };
-  
-  // Only reviewers, managers, and admins can review
-  if (user.role !== 'reviewer' && user.role !== 'manager' && user.role !== 'admin') {
-    return { error: '照査権限がありません' };
-  }
-  
-  var employee = getUserById(report.employee_id);
-  
-  var level = 1; // Review level
-  decideApproval(reportId, level, 'approved', comment);
-  _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'reviewed', updated_at: _now() }, TASK_REPORT_H);
-  
-  // Send Mattermost notification
-  if (employee) {
-    try {
-      var notificationData = {
-        reportType: 'task',
-        reportDate: report.report_date,
-        employeeName: employee.name,
-        employeeEmail: employee.email,
-        approverName: user.name,
-        decision: 'reviewed',
-        reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
-      };
-      sendMattermostMessage(notificationData, 'daily-report');
-    } catch (e) {
-      Logger.log('Mattermost notification failed: ' + e.toString());
-    }
-  }
-  
-  return { success: true };
+    return { success: true };
+  });
 }
 
 // Approve a task report (final approval step)
 function approveTaskReportAction(reportId, comment) {
-  var user = getCurrentUser();
-  if (!user) return { error: 'Unauthorized' };
+  return _withLock('approveTaskReport_' + reportId, function() {
+    var user = getCurrentUser();
+    if (!user) return { error: 'Unauthorized' };
 
-  var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
-  if (!report) return { error: 'レポートが見つかりません' };
-  
-  // Only managers and admins can do final approval
-  if (user.role !== 'manager' && user.role !== 'admin') {
-    return { error: '承認権限がありません。照査のみ可能です。' };
-  }
-  
-  var employee = getUserById(report.employee_id);
-
-  var level = 2; // Final approval level
-  decideApproval(reportId, level, 'approved', comment);
-  _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'approved', updated_at: _now() }, TASK_REPORT_H);
-  
-  // Send Mattermost notification
-  if (employee) {
-    try {
-      var notificationData = {
-        reportType: 'task',
-        reportDate: report.report_date,
-        employeeName: employee.name,
-        employeeEmail: employee.email,
-        approverName: user.name,
-        decision: 'approved',
-        reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
-      };
-      sendMattermostMessage(notificationData, 'daily-report');
-    } catch (e) {
-      Logger.log('Mattermost notification failed: ' + e.toString());
-      // Don't fail the approval if notification fails
+    var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
+    if (!report) return { error: 'レポートが見つかりません' };
+    
+    // Check if already approved (prevent duplicate action)
+    if (report.status === 'approved') {
+      return { error: 'この日報は既に承認済みです', status: report.status };
     }
-  }
+    
+    // Only managers and admins can do final approval
+    if (user.role !== 'manager' && user.role !== 'admin') {
+      return { error: '承認権限がありません。照査のみ可能です。' };
+    }
+    
+    var employee = getUserById(report.employee_id);
+
+    var level = 2; // Final approval level
+    decideApproval(reportId, level, 'approved', comment);
+    _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'approved', updated_at: _now() }, TASK_REPORT_H);
+    _invalidateCache(CACHE_KEY_TASK_REPORTS);
   
-  return { success: true };
+    // Send Mattermost notification
+    if (employee) {
+      try {
+        var notificationData = {
+          reportType: 'task',
+          reportDate: report.report_date,
+          employeeName: employee.name,
+          employeeEmail: employee.email,
+          approverName: user.name,
+          decision: 'approved',
+          reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
+        };
+        sendMattermostMessage(notificationData, 'daily-report');
+      } catch (e) {
+        Logger.log('Mattermost notification failed: ' + e.toString());
+        // Don't fail the approval if notification fails
+      }
+    }
+  
+    return { success: true };
+  });
 }
 
 // Reject a task report
 function rejectTaskReportAction(reportId, comment) {
-  var user = getCurrentUser();
-  if (!user) return { error: 'Unauthorized' };
+  return _withLock('rejectTaskReport_' + reportId, function() {
+    var user = getCurrentUser();
+    if (!user) return { error: 'Unauthorized' };
 
-  var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
-  if (!report) return { error: 'レポートが見つかりません' };
-  
-  // Get employee information for notification
-  var employee = getUserById(report.employee_id);
-
-  var level = (user.role === 'reviewer') ? 1 : 2;
-  decideApproval(reportId, level, 'rejected', comment);
-  _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'rejected', updated_at: _now() }, TASK_REPORT_H);
-  
-  // Send Mattermost notification
-  if (employee) {
-    try {
-      var notificationData = {
-        reportType: 'task',
-        reportDate: report.report_date,
-        employeeName: employee.name,
-        employeeEmail: employee.email,
-        approverName: user.name,
-        decision: 'rejected',
-        reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
-      };
-      sendMattermostMessage(notificationData, 'daily-report');
-    } catch (e) {
-      Logger.log('Mattermost notification failed: ' + e.toString());
-      // Don't fail the rejection if notification fails
+    var report = getAllTaskReports().find(function (r) { return r.id === reportId; });
+    if (!report) return { error: 'レポートが見つかりません' };
+    
+    // Check if already rejected (prevent duplicate action)
+    if (report.status === 'rejected') {
+      return { error: 'この日報は既に差戻し済みです', status: report.status };
     }
-  }
   
-  return { success: true };
+    // Get employee information for notification
+    var employee = getUserById(report.employee_id);
+
+    var level = (user.role === 'reviewer') ? 1 : 2;
+    decideApproval(reportId, level, 'rejected', comment);
+    _updateRow(SHEET_TASK_REPORTS, reportId, { status: 'rejected', updated_at: _now() }, TASK_REPORT_H);
+    _invalidateCache(CACHE_KEY_TASK_REPORTS);
+  
+    // Send Mattermost notification
+    if (employee) {
+      try {
+        var notificationData = {
+          reportType: 'task',
+          reportDate: report.report_date,
+          employeeName: employee.name,
+          employeeEmail: employee.email,
+          approverName: user.name,
+          decision: 'rejected',
+          reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
+        };
+        sendMattermostMessage(notificationData, 'daily-report');
+      } catch (e) {
+        Logger.log('Mattermost notification failed: ' + e.toString());
+        // Don't fail the rejection if notification fails
+      }
+    }
+  
+    return { success: true };
+  });
 }
 
 // ── Admin History functions ───────────────────────────────────
@@ -1749,6 +2522,284 @@ function getAdminTaskReports() {
       created_at:       r.created_at       || '',
     };
   });
+}
+
+/**
+ * Get admin telework reports with date range filtering and pagination
+ * @param {Object} options - { startDate, endDate, page, pageSize, status, employeeId }
+ * @returns {Object} Paginated report data
+ */
+function getAdminTeleworkReportsPaginated(options) {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  
+  options = options || {};
+  var reports = getReportsInDateRange(options.startDate, options.endDate, options.employeeId);
+  var users   = getAllUsers();
+  var depts   = getAllDepartments();
+  
+  // Build user lookup for O(1) access
+  var userMap = {};
+  users.forEach(function(u) { userMap[u.id] = u; });
+  
+  // Build dept lookup for O(1) access
+  var deptMap = {};
+  depts.forEach(function(d) { deptMap[d.id] = d; });
+  
+  // IMPORTANT: getReportsInDateRange filters by start_date (week Sunday),
+  // so records where start_date is in range but request_date exceeds end date can slip through.
+  // Enforce actual date boundaries on request_date here.
+  if (options.startDate || options.endDate) {
+    var reqStart = options.startDate ? new Date(options.startDate) : null;
+    var reqEnd   = options.endDate   ? new Date(options.endDate)   : null;
+    if (reqEnd) reqEnd.setHours(23, 59, 59, 999);
+    reports = reports.filter(function(r) {
+      if (!r.request_date) return true;
+      var reqDate = new Date(r.request_date);
+      if (reqStart && reqDate < reqStart) return false;
+      if (reqEnd   && reqDate > reqEnd)   return false;
+      return true;
+    });
+  }
+  
+  // Filter by status if specified
+  if (options.status) {
+    reports = reports.filter(function(r) { return r.status === options.status; });
+  }
+  
+  // Filter by week (Sunday-Saturday) using request_date
+  if (options.weekSundayKey) {
+    var weekSunday = new Date(options.weekSundayKey);
+    var weekSaturday = new Date(weekSunday);
+    weekSaturday.setDate(weekSunday.getDate() + 6);
+    weekSaturday.setHours(23, 59, 59, 999);
+    
+    reports = reports.filter(function(r) {
+      if (!r.request_date) return false;
+      var requestDate = new Date(r.request_date);
+      return requestDate >= weekSunday && requestDate <= weekSaturday;
+    });
+  }
+  
+  var mapped = reports.map(function (r) {
+    var emp = userMap[r.employee_id] || null;
+    var dept = (emp && emp.department_id) ? deptMap[emp.department_id] : null;
+    return {
+      id:            r.id,
+      employee_id:   r.employee_id,
+      employee_name: emp  ? emp.name  : '不明',
+      employee_name_lower: emp ? emp.name.toLowerCase() : '',
+      department:    dept ? dept.name : '未設定',
+      report_type:   r.report_type  || '',
+      request_date:  r.request_date || '',
+      week_title:    r.week_title   || '',
+      start_date:    r.start_date   || '',
+      end_date:      r.end_date     || '',
+      work_type:     r.work_type    || '',
+      day_short:     r.day_short    || '',
+      notes:         r.notes        || '',
+      redmine_tasks: r.redmine_tasks || '[]',
+      status:        r.status       || '',
+      created_at:    r.created_at   || '',
+    };
+  });
+  
+  // Filter by employee name if specified
+  if (options.employeeName && options.employeeName.trim()) {
+    var searchTerm = options.employeeName.trim().toLowerCase();
+    mapped = mapped.filter(function(r) {
+      return r.employee_name_lower.indexOf(searchTerm) !== -1;
+    });
+  }
+  
+  // Remove helper field before returning
+  mapped.forEach(function(r) { delete r.employee_name_lower; });
+  
+  // Sort by start_date descending
+  mapped.sort(function(a, b) {
+    return new Date(b.start_date).getTime() - new Date(a.start_date).getTime();
+  });
+  
+  return _paginate(mapped, options.page, options.pageSize);
+}
+
+/**
+ * Get admin task reports with date range filtering and pagination
+ * @param {Object} options - { startDate, endDate, page, pageSize, status, employeeId }
+ * @returns {Object} Paginated task report data
+ */
+function getAdminTaskReportsPaginated(options) {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  
+  options = options || {};
+  var reports = getTaskReportsInDateRange(options.startDate, options.endDate, options.employeeId);
+  var users   = getAllUsers();
+  var depts   = getAllDepartments();
+  
+  // Build user lookup for O(1) access
+  var userMap = {};
+  users.forEach(function(u) { userMap[u.id] = u; });
+  
+  // Build dept lookup for O(1) access
+  var deptMap = {};
+  depts.forEach(function(d) { deptMap[d.id] = d; });
+  
+  // Filter by status if specified
+  if (options.status) {
+    reports = reports.filter(function(r) { return r.status === options.status; });
+  }
+  
+  // Filter by week (Sunday-Saturday) using report_date
+  // getTaskReportsInDateRange already filters on report_date, so boundary is already enforced.
+  if (options.weekSundayKey) {
+    var weekSunday = new Date(options.weekSundayKey);
+    var weekSaturday = new Date(weekSunday);
+    weekSaturday.setDate(weekSunday.getDate() + 6);
+    weekSaturday.setHours(23, 59, 59, 999);
+    
+    reports = reports.filter(function(r) {
+      if (!r.report_date) return false;
+      var reportDate = new Date(r.report_date);
+      return reportDate >= weekSunday && reportDate <= weekSaturday;
+    });
+  }
+  
+  var mapped = reports.map(function (r) {
+    var emp = userMap[r.employee_id] || null;
+    var empNameLower = emp ? emp.name.toLowerCase() : '';
+    
+    // Parse employee's department IDs
+    var empDeptIds = [];
+    if (emp && emp.department_id) {
+      try {
+        if (emp.department_id.startsWith('[')) {
+          empDeptIds = JSON.parse(emp.department_id);
+        } else {
+          empDeptIds = [emp.department_id];
+        }
+      } catch (e) {
+        empDeptIds = [emp.department_id];
+      }
+    }
+    
+    // Get department names using O(1) lookup
+    var deptNames = empDeptIds.map(function(id) {
+      var d = deptMap[id];
+      return d ? d.name : null;
+    }).filter(function(n) { return n !== null; });
+    
+    return {
+      id:               r.id,
+      employee_id:      r.employee_id,
+      employee_name:    emp  ? emp.name  : '不明',
+      employee_name_lower: empNameLower,
+      department:       deptNames.length > 0 ? deptNames.join(', ') : '未設定',
+      department_id:    emp  ? (emp.department_id || '') : '',
+      report_date:      r.report_date      || '',
+      day_short:        r.day_short        || '',
+      important_issues: r.important_issues || '',
+      next_day_plan:    r.next_day_plan    || '',
+      redmine_tasks:    r.redmine_tasks    || '[]',
+      status:           r.status           || '',
+      created_at:       r.created_at       || '',
+    };
+  });
+  
+  // Filter by employee name if specified
+  if (options.employeeName && options.employeeName.trim()) {
+    var searchTerm = options.employeeName.trim().toLowerCase();
+    mapped = mapped.filter(function(r) {
+      return r.employee_name_lower.indexOf(searchTerm) !== -1;
+    });
+  }
+  
+  // Remove helper field before returning
+  mapped.forEach(function(r) { delete r.employee_name_lower; });
+  
+  // Sort by report_date descending
+  mapped.sort(function(a, b) {
+    return new Date(b.report_date).getTime() - new Date(a.report_date).getTime();
+  });
+  
+  return _paginate(mapped, options.page, options.pageSize);
+}
+
+/**
+ * Get all available weeks (Sunday keys) within a date range for admin history
+ * @param {Object} options - { startDate, endDate, reportType }
+ * @returns {Array} Array of week objects with {sundayKey, label}
+ */
+function getAvailableWeeksForDateRange(options) {
+  var user = getCurrentUser();
+  if (!user || user.role !== 'admin') return { error: 'Unauthorized' };
+  
+  options = options || {};
+  var reportType = options.reportType || 'telework';
+  
+  // Resolve date range (default: last 1 month)
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var endDate = options.endDate ? new Date(options.endDate) : new Date(today);
+  endDate.setHours(0, 0, 0, 0);
+  var startDate = options.startDate ? new Date(options.startDate) : (function() {
+    var d = new Date(today);
+    d.setMonth(d.getMonth() - 1);
+    return d;
+  })();
+  startDate.setHours(0, 0, 0, 0);
+  
+  // Cache key
+  var startKey = startDate.getFullYear() + '-' + String(startDate.getMonth() + 1).padStart(2, '0') + '-' + String(startDate.getDate()).padStart(2, '0');
+  var endKey   = endDate.getFullYear()   + '-' + String(endDate.getMonth()   + 1).padStart(2, '0') + '-' + String(endDate.getDate()).padStart(2, '0');
+  var cacheKey = 'weeks_' + reportType + '_' + startKey + '_' + endKey;
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) {}
+  }
+  
+  // Find the Sunday on or before startDate
+  var dow = startDate.getDay(); // 0 = Sunday
+  var cur = new Date(startDate);
+  cur.setDate(startDate.getDate() - dow);
+  cur.setHours(0, 0, 0, 0);
+  
+  var weeks = [];
+  
+  // Iterate week by week while the week's Sunday is <= endDate
+  while (cur <= endDate) {
+    var sun = new Date(cur);
+    var sat = new Date(cur);
+    sat.setDate(cur.getDate() + 6);
+    
+    // Calculate ISO week number based on Sunday
+    var utcD = new Date(Date.UTC(sun.getFullYear(), sun.getMonth(), sun.getDate()));
+    var utcDay = utcD.getUTCDay() || 7;
+    utcD.setUTCDate(utcD.getUTCDate() + 4 - utcDay);
+    var yearStart = new Date(Date.UTC(utcD.getUTCFullYear(), 0, 1));
+    var weekNum = Math.ceil(((utcD - yearStart) / 86400000 + 1) / 7);
+    
+    var sunStr = sun.getFullYear() + '-' + String(sun.getMonth() + 1).padStart(2, '0') + '-' + String(sun.getDate()).padStart(2, '0');
+    var satStr = sat.getFullYear() + '-' + String(sat.getMonth() + 1).padStart(2, '0') + '-' + String(sat.getDate()).padStart(2, '0');
+    
+    weeks.push({
+      sundayKey: sunStr,
+      label: '第' + weekNum + '週 ' + sunStr + '（日）〜' + satStr + '（土）',
+      timestamp: sun.getTime()
+    });
+    
+    // Advance to next Sunday
+    cur.setDate(cur.getDate() + 7);
+  }
+  
+  // Sort descending (most recent first)
+  weeks.sort(function(a, b) { return b.timestamp - a.timestamp; });
+  
+  // Cache for 5 minutes
+  try { cache.put(cacheKey, JSON.stringify(weeks), 300); } catch (e) {}
+  
+  return weeks;
 }
 
 // Delete a single telework report row by id
