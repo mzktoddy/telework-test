@@ -272,6 +272,19 @@ function renderDepartmentCheckboxes() {
     }
   });
   
+  // Helper function to get all child department IDs recursively
+  function getAllChildDeptIds(deptId) {
+    var childIds = [];
+    var children = parentMap[deptId] || [];
+    children.forEach(function(child) {
+      childIds.push(child.id);
+      // Recursively get grandchildren
+      var grandChildren = getAllChildDeptIds(child.id);
+      childIds = childIds.concat(grandChildren);
+    });
+    return childIds;
+  }
+  
   // Render departments hierarchically
   function renderDept(dept, level) {
     var label = document.createElement('label');
@@ -282,6 +295,25 @@ function renderDepartmentCheckboxes() {
     checkbox.type = 'checkbox';
     checkbox.value = dept.name;
     checkbox.className = 'dept-checkbox w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-2 focus:ring-blue-300';
+    // Store department ID for parent-child relationship tracking
+    checkbox.setAttribute('data-dept-id', dept.id);
+    
+    // Add event listener to handle parent-child checking
+    checkbox.addEventListener('change', function() {
+      var isChecked = this.checked;
+      var deptId = this.getAttribute('data-dept-id');
+      
+      // Get all child department IDs
+      var childIds = getAllChildDeptIds(deptId);
+      
+      // Check/uncheck all child checkboxes
+      childIds.forEach(function(childId) {
+        var childCheckbox = container.querySelector('.dept-checkbox[data-dept-id="' + childId + '"]');
+        if (childCheckbox) {
+          childCheckbox.checked = isChecked;
+        }
+      });
+    });
     
     var span = document.createElement('span');
     span.textContent = (level > 0 ? '└ ' : '') + dept.name;

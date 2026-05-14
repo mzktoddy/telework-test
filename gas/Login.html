@@ -117,6 +117,9 @@
 
     // Active Google Workspace session email — fetched once on page load
     var gwsSessionEmail = '';
+    
+    // Redirect page from server-side template (the originally requested page)
+    var redirectPage = '<?!= redirectPage ?>' || '';
 
     // ── On page load: get GWS session email + try silent auto-login ──
     //\window.addEventListener('load', function () {
@@ -229,7 +232,7 @@
       google.script.run
         .withSuccessHandler(function (result) { setLoading(false); handleResult(result); })
         .withFailureHandler(function ()        { setLoading(false); showError('サーバーエラーが発生しました。もう一度お試しください。'); })
-        .loginUser(email, password);
+        .loginUser(email, password, redirectPage);
     });
 
     // ── Google Workspace button ───────────────────────────────────
@@ -242,7 +245,7 @@
       google.script.run
         .withSuccessHandler(function (result) { setLoading(false); handleResult(result); })
         .withFailureHandler(function ()        { setLoading(false); showError('Google認証に失敗しました。管理者にお問い合わせください。'); })
-        .loginWithGoogle();
+        .loginWithGoogle(redirectPage);
     }
   </script>
 </body>

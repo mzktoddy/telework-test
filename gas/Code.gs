@@ -33,7 +33,8 @@ function doGet(e) {
   // Cache-only auth check — no GWS session fallback
   var user = getCurrentUser();
   if (!user) {
-    return renderPage('Login', null);
+    // Pass the requested page to Login so it can redirect after authentication
+    return renderPage('Login', null, page);
   }
 
   // No page param → default to dashboard
@@ -80,12 +81,13 @@ function _routePage(page, user) {
 }
 
 // ── Template renderer ────────────────────────────────────────
-function renderPage(templateName, user) {
+function renderPage(templateName, user, redirectPage) {
   var tmpl = HtmlService.createTemplateFromFile(templateName);
   // Encode to be safe inside a single-quoted HTML attribute
   // (JSON uses double quotes, so single-quote wrapping in the HTML is safe)
-  tmpl.user      = user ? JSON.stringify(user) : 'null';
-  tmpl.scriptUrl = ScriptApp.getService().getUrl();
+  tmpl.user         = user ? JSON.stringify(user) : 'null';
+  tmpl.scriptUrl    = ScriptApp.getService().getUrl();
+  tmpl.redirectPage = redirectPage || ''; // Pass the originally requested page
   return tmpl
     .evaluate()
     .setTitle('在宅勤務報告システム')
@@ -583,8 +585,7 @@ function sendDailyPendingNotifications() {
 
     var text = todayLabel + header + '\n\n' +
                '@' + mention + '\n\n' +
-               table + '\n' +
-               '[内容を確認する](' + systemUrl + '?page=approve)';
+               table;
 
     try {
       UrlFetchApp.fetch(MATTERMOST_WEBHOOK_URL, {

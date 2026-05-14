@@ -30,7 +30,7 @@ function getCurrentUser() {
 
 // ── Called from Google Workspace button in Login.html ────────
 //  Uses the active Google session — no password required.
-function loginWithGoogle() {
+function loginWithGoogle(redirectPage) {
   try {
     var sessionEmail = '';
     try { sessionEmail = Session.getActiveUser().getEmail(); } catch (e) {}
@@ -53,7 +53,7 @@ function loginWithGoogle() {
       return { error: 'アカウントが無効です。管理者にお問い合わせください。' };
     }
 
-    return _buildSession(user);
+    return _buildSession(user, redirectPage);
   } catch (err) {
     return { error: 'ログインエラー: ' + err.message };
   }
@@ -63,7 +63,7 @@ function loginWithGoogle() {
 //  If the GWS session email matches the typed email, password is
 //  not required (GWS identity is used as proof). Otherwise the
 //  SHA-256 password hash is checked.
-function loginUser(email, password) {
+function loginUser(email, password, redirectPage) {
   try {
     if (!email) return { error: 'メールアドレスを入力してください。' };
 
@@ -79,7 +79,7 @@ function loginUser(email, password) {
 
     if (gwsMatch) {
       // GWS identity confirmed — no password needed
-      return _buildSession(user);
+      return _buildSession(user, redirectPage);
     }
 
     // No GWS match — require password
@@ -96,16 +96,16 @@ function loginUser(email, password) {
       return { error: 'パスワードが正しくありません。' };
     }
 
-    return _buildSession(user);
+    return _buildSession(user, redirectPage);
   } catch (err) {
     return { error: 'ログインエラー: ' + err.message };
   }
 }
 
 // ── Shared: write cache and build redirect response ─────────────
-//  Redirects all users to dashboard after login.
+//  Redirects to the originally requested page, or dashboard if none specified.
 //  The cache is required for getCurrentUser() to confirm authentication.
-function _buildSession(user) {
+function _buildSession(user, redirectPage) {
   var info = {
     id:            user.id,
     email:         user.email,
@@ -114,9 +114,12 @@ function _buildSession(user) {
     department_id: user.department_id,
   };
   CacheService.getUserCache().put('gasUser', JSON.stringify(info), 1800);
+  
+  // Redirect to originally requested page, or dashboard as default
+  var page = redirectPage || 'dashboard';
   return {
     success:     true,
-    redirectUrl: ScriptApp.getService().getUrl() + '?page=dashboard',
+    redirectUrl: ScriptApp.getService().getUrl() + '?page=' + page,
   };
 }
 
