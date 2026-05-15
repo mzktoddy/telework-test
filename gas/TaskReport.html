@@ -230,11 +230,28 @@ var dayData        = makeFreshDayData();
 
 function makeFreshDayData() {
   return [0,1,2,3,4,5,6].map(function () {
-    return { importantIssues: '', nextDayPlan: '', redmineTasks: [], approvals: [], edited: false, savedStatus: null };
+    return { importantIssues: '', nextDayPlan: '', redmineTasks: [], approvals: [], edited: false, savedStatus: null,
+             _origImportantIssues: null, _origNextDayPlan: null, _origRedmineIds: null };
   });
 }
 
+// ── Skeleton loading state for day cards ─────────────────────
+function _showDayCardSkeletons() {
+  var skeletonHtml = '';
+  for (var _s = 0; _s < 7; _s++) {
+    skeletonHtml +=
+      '<div class="flex items-start justify-between p-4 bg-white border border-slate-200 rounded-lg animate-pulse">' +
+        '<div class="flex items-center gap-4 flex-1">' +
+          '<div class="border-slate-200 border-2 bg-slate-100 rounded-md min-w-16 h-16"></div>' +
+          '<div class="h-5 w-16 bg-slate-200 rounded-full"></div>' +
+        '</div>' +
+      '</div>';
+  }
+  document.getElementById('dayCards').innerHTML = skeletonHtml;
+}
+
 // ── Load task reports on page load ────────────────────────────
+_showDayCardSkeletons(); // show skeletons while waiting for server data
 google.script.run
   .withSuccessHandler(function (data) {
     if (data && !data.error) myTaskReports = data;
@@ -250,15 +267,18 @@ weekSel.addEventListener('change', function () {
   document.getElementById('detailDateLabel').textContent = '日を選択してください';
   document.getElementById('detailPanel').innerHTML =
     '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
-  renderWeek();
+  _showDayCardSkeletons(); // show skeletons while refetching
   google.script.run
     .withSuccessHandler(function (data) {
       if (data && !data.error) {
         myTaskReports = data;
         dayData = makeFreshDayData();
         renderWeek();
+      } else {
+        renderWeek();
       }
     })
+    .withFailureHandler(function () { renderWeek(); })
     .getMyTaskReports();
 });
 
@@ -288,6 +308,16 @@ function renderWeek() {
       tempData[i].approvals       = match.approvals || [];
       tempData[i].edited          = true;
       tempData[i].savedStatus     = match.status;
+      if (match.status === 'rejected') {
+        tempData[i]._origImportantIssues = match.important_issues || '';
+        tempData[i]._origNextDayPlan     = match.next_day_plan || '';
+        tempData[i]._origRedmineIds      = (match.redmineTasks || []).map(function (t) { return String(t.id); }).sort().join(',');
+        console.log('Setting original values for rejected report on day', i, {
+          origImportant: tempData[i]._origImportantIssues,
+          origPlan: tempData[i]._origNextDayPlan,
+          origRedmine: tempData[i]._origRedmineIds
+        });
+      }
     }
   }
   // Preserve optimistic state
@@ -376,7 +406,6 @@ function makeDayCard(d, dayShort, idx) {
 
 // ── Detail panel ──────────────────────────────────────────────
 function openDetailPanel(d, dayShort, idx) {
-  debugger;
   var dStr    = fmtDate(d);
   var isoStr  = isoDate(d);
   var data    = dayData[idx];
@@ -439,28 +468,41 @@ function openDetailPanel(d, dayShort, idx) {
         'class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-300">' +
         escapeHtml(data.nextDayPlan) +
       '</textarea>' +
-    '</div>' +
-    // Action buttons — individual day submit
-    '<div class="space-y-3">' +
-      '<div class="flex gap-3">' +
-        '<button id="saveBtn_' + idx + '" onclick="saveTaskDay(' + idx + ')" ' +
-          'class="flex-1 h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors">' +
-          '保存' +
-        '</button>' +
-        '<button onclick="cancelTaskDay(' + idx + ')" ' +
-          'class="flex-1 h-10 px-6 bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-full transition-colors">' +
-          'キャンセル' +
-        '</button>' +
-      '</div>' +
-      '<button id="submitTaskDayBtn_' + idx + '" onclick="submitTaskDay(' + idx + ')" ' +
-        'class="w-full h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors flex items-center justify-center gap-2">' +
-        '申請' +
-        '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
-          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>' +
-        '</svg>' +
+    '</div>';
+  // Action buttons — save / cancel / submit or withdraw
+  var _isSubmitted = (data.savedStatus === 'submitted');
+  var _isRejected  = (data.savedStatus === 'rejected');
+    var _saveBtnHtml = _isSubmitted
+      ? ('<button disabled ' +
+         'class="flex-1 h-10 px-6 bg-slate-300 text-slate-500 text-sm font-medium rounded-full cursor-not-allowed">' +
+         '保存' +
+         '</button>')
+      : ('<button id="saveBtn_' + idx + '" onclick="saveTaskDay(' + idx + ')" ' +
+         'class="flex-1 h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors">' +
+         '保存' +
+         '</button>');
+    var _submitBtnHtml = _isSubmitted
+      ? ('<button id="submitTaskDayBtn_' + idx + '" onclick="withdrawTaskDayReport(' + idx + ')" ' +
+         'class="w-full h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors flex items-center justify-center gap-2">' +
+         '取り下げ' +
+         '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+           '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>' +
+         '</svg>' +
+         '</button>')
+      : ('<button id="submitTaskDayBtn_' + idx + '" onclick="submitTaskDay(' + idx + ')" ' +
+         'class="w-full h-10 px-6 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-full transition-colors flex items-center justify-center gap-2">' +
+         (_isRejected ? '再申請' : '申請') +
+         '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+           '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>' +
+         '</svg>' +
+         '</button>');
+    panel.innerHTML += '<div class="space-y-3"><div class="flex gap-3">' + _saveBtnHtml +
+      '<button onclick="cancelTaskDay(' + idx + ')" ' +
+        'class="flex-1 h-10 px-6 bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-full transition-colors">' +
+        'キャンセル' +
       '</button>' +
-    '</div>' +
-    '<div id="dayMsg_' + idx + '" class="hidden mt-3 text-sm text-center p-2 rounded-md"></div>';
+      '</div>' + _submitBtnHtml + '</div>' +
+      '<div id="dayMsg_' + idx + '" class="hidden mt-3 text-sm text-center p-2 rounded-md"></div>';
 
   // Render saved Redmine tasks
   if (data.redmineTasks && data.redmineTasks.length > 0) {
@@ -663,6 +705,28 @@ function submitTaskDay(idx) {
     if (!importantIssuesVal && !hasRedmine) {
       showDayMsg(idx, '本日の作業報告またはRedmine作業実績を入力してください', false);
       ii.focus(); return;
+    }
+    // Validate rejected reports have been changed
+    if (dayData[idx].savedStatus === 'rejected' && dayData[idx]._origImportantIssues !== null) {
+      console.log('Validating rejected report:', {
+        currentImportant: importantIssuesVal,
+        origImportant: dayData[idx]._origImportantIssues,
+        currentPlan: nextPlanVal,
+        origPlan: dayData[idx]._origNextDayPlan,
+        status: dayData[idx].savedStatus
+      });
+      var _currentRedmineIds = (dayData[idx].redmineTasks || []).map(function (t) { return String(t.id); }).sort().join(',');
+      if (importantIssuesVal === (dayData[idx]._origImportantIssues || '').trim() &&
+          nextPlanVal === (dayData[idx]._origNextDayPlan || '').trim() &&
+          _currentRedmineIds === dayData[idx]._origRedmineIds) {
+        alert('差戻しされた日報に変更がありません。\n内容を修正してから再申請してください。\n\n日付: ' + fmtDate(date));
+        return;
+      }
+    } else {
+      console.log('Skipping validation:', {
+        status: dayData[idx].savedStatus,
+        hasOrig: dayData[idx]._origImportantIssues !== null
+      });
     }
   }
 
@@ -883,6 +947,63 @@ function showDayMsg(idx, msg, ok) {
     (ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
   el.classList.remove('hidden');
   if (ok) { setTimeout(function () { el.classList.add('hidden'); }, 2500); }
+}
+
+// ── Withdraw submitted task report day ──────────────────────────
+function withdrawTaskDayReport(idx) {
+  var offset  = parseInt(weekSel.value) || 0;
+  var sun     = getSundayOfWeek(offset);
+  var date    = new Date(sun); date.setDate(sun.getDate() + idx);
+  var dateStr = isoDate(date);
+
+  if (!confirm('この日の日報申請を取り下げますか？\n\n日付: ' + fmtDate(date) + '\n\nこの操作は取り消せません。')) {
+    return;
+  }
+
+  var btn = document.getElementById('submitTaskDayBtn_' + idx);
+  if (btn) {
+    btn.disabled  = true;
+    btn.innerHTML = '<div class="flex items-center justify-center gap-2">' +
+      '<div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>' +
+      '取り下げ中...</div>';
+  }
+
+  dayData[idx].savedStatus = null;
+  dayData[idx].edited      = false;
+
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.error) {
+        dayData[idx].savedStatus = 'submitted';
+        dayData[idx].edited      = true;
+        renderWeek();
+        openDetailPanel(date, DAY_SHORTS[idx], idx);
+        showDayMsg(idx, r.error, false);
+        return;
+      }
+      showDayMsg(idx, '✅ 日報申請を取り下げました', true);
+      selectedDayIdx = null;
+      document.getElementById('detailDateLabel').textContent = '日を選択してください';
+      document.getElementById('detailPanel').innerHTML =
+        '<p class="text-sm text-slate-400">左のカレンダーから報告する日を選択してください。</p>';
+      google.script.run
+        .withSuccessHandler(function (data) {
+          if (data && !data.error) {
+            myTaskReports = data;
+            dayData       = makeFreshDayData();
+            renderWeek();
+          }
+        })
+        .getMyTaskReports();
+    })
+    .withFailureHandler(function (err) {
+      dayData[idx].savedStatus = 'submitted';
+      dayData[idx].edited      = true;
+      renderWeek();
+      openDetailPanel(date, DAY_SHORTS[idx], idx);
+      showDayMsg(idx, '取り下げに失敗しました: ' + (err && err.message ? err.message : '不明なエラー'), false);
+    })
+    .withdrawTaskReport(dateStr);
 }
 
 // ── Logout ────────────────────────────────────────────────────

@@ -48,6 +48,10 @@ function adminExportFiltered(options) {
   
   if (reportType === 'telework') {
     reports = getReportsInDateRange(options.startDate, options.endDate, options.employeeId);
+    
+    // Filter out draft status records - only export submitted/reviewed/approved/rejected
+    reports = reports.filter(function(r) { return r.status !== 'draft'; });
+    
     users = getAllUsers();
     depts = getAllDepartments();
     
@@ -162,6 +166,10 @@ function adminExportFiltered(options) {
   } else {
     // Task reports
     reports = getTaskReportsInDateRange(options.startDate, options.endDate, options.employeeId);
+    
+    // Filter out draft status records - only export submitted/reviewed/approved/rejected
+    reports = reports.filter(function(r) { return r.status !== 'draft'; });
+    
     users = getAllUsers();
     depts = getAllDepartments();
     
@@ -298,7 +306,7 @@ function getSheet(name) {
 function setupSheets() {
   var ss = getSpreadsheet();
   _createSheet(ss, SHEET_DEPARTMENTS, ['id','name','parent_department','created_at']);
-  _createSheet(ss, SHEET_USERS,       ['id','email','password_hash','name','role','department_id','is_active','created_at','updated_at']);
+  _createSheet(ss, SHEET_USERS,       ['id','email','password_hash','name','role','department_id','is_active','created_at','updated_at','mattermost_username']);
   _createSheet(ss, SHEET_REPORTS,     ['id','employee_id','report_type','start_date','end_date','request_date','week_title','work_type','day_short','notes','redmine_tasks','status','created_at','updated_at']);
   _createSheet(ss, SHEET_APPROVALS,   ['id','report_id','approver_id','level','decision','comment','decided_at','created_at']);
   _createSheet(ss, SHEET_TASK_REPORTS, ['id','employee_id','report_date','day_short','important_issues','next_day_plan','redmine_tasks','status','created_at','updated_at']);
@@ -937,7 +945,7 @@ function createDepartment(name, parentDepartmentId) {
 }
 
 // ── Users ─────────────────────────────────────────────────────
-var USER_H = ['id','email','password_hash','name','role','department_id','is_active','created_at','updated_at'];
+var USER_H = ['id','email','password_hash','name','role','department_id','is_active','created_at','updated_at','mattermost_username'];
 
 function getAllUsers() {
   return _getCachedData(CACHE_KEY_USERS, function() {
@@ -995,7 +1003,7 @@ function getUsersByDepartments(departmentIds) {
   }
   return result;
 }
-function createUser(name, email, role, departmentIds, plainPassword) {
+function createUser(name, email, role, departmentIds, plainPassword, mattermostUsername) {
   // departmentIds can be a string (single ID), array of IDs, or empty
   var deptIdStr = '';
   if (Array.isArray(departmentIds)) {
@@ -1005,15 +1013,16 @@ function createUser(name, email, role, departmentIds, plainPassword) {
   }
   
   var u = {
-    id:            _uuid(),
-    email:         email,
-    password_hash: plainPassword ? hashPassword(plainPassword) : 'GWS_AUTH_ONLY',
-    name:          name,
-    role:          role,                  // employee | reviewer | manager | admin
-    department_id: deptIdStr,
-    is_active:     true,
-    created_at:    _now(),
-    updated_at:    _now(),
+    id:                  _uuid(),
+    email:               email,
+    password_hash:       plainPassword ? hashPassword(plainPassword) : 'GWS_AUTH_ONLY',
+    name:                name,
+    role:                role,                  // employee | reviewer | manager | admin
+    department_id:       deptIdStr,
+    is_active:           true,
+    created_at:          _now(),
+    updated_at:          _now(),
+    mattermost_username: mattermostUsername || '',
   };
   _appendRow(SHEET_USERS, u, USER_H);
   _invalidateCache(CACHE_KEY_USERS);
@@ -1324,13 +1333,14 @@ function getAllEmployees() {
     }).filter(function(name) { return name !== null; });
     
     return {
-      id:          u.id,
-      name:        u.name,
-      email:       u.email,
-      role:        u.role,
-      departments: deptNames,
-      is_active:   u.is_active,
-      created_at:  u.created_at,
+      id:                  u.id,
+      name:                u.name,
+      email:               u.email,
+      role:                u.role,
+      departments:         deptNames,
+      is_active:           u.is_active,
+      created_at:          u.created_at,
+      mattermost_username: u.mattermost_username || '',
     };
   });
 }
@@ -1606,6 +1616,7 @@ function reviewWeekReport(dayIds, comment) {
         weekTitle: firstReport.week_title,
         employeeName: employee.name,
         employeeEmail: employee.email,
+        mattermostUsername: employee.mattermost_username || null,
         approverName: user.name,
         decision: 'reviewed',
         reportUrl: ScriptApp.getService().getUrl() + '?page=reports',
@@ -1693,6 +1704,7 @@ function approveWeekReport(dayIds, comment) {
         weekTitle: firstReport.week_title,
         employeeName: employee.name,
         employeeEmail: employee.email,
+        mattermostUsername: employee.mattermost_username || null,
         approverName: user.name,
         decision: 'approved',
         reportUrl: ScriptApp.getService().getUrl() + '?page=reports',
@@ -1738,6 +1750,7 @@ function rejectWeekReport(dayIds, comment) {
         weekTitle: firstReport.week_title,
         employeeName: employee.name,
         employeeEmail: employee.email,
+        mattermostUsername: employee.mattermost_username || null,
         approverName: user.name,
         decision: 'rejected',
         reportUrl: ScriptApp.getService().getUrl() + '?page=reports',
@@ -1777,7 +1790,7 @@ function addEmployee(data) {
     if (dept) deptIds.push(dept.id);
   }
   
-  var newUser = createUser(data.name, data.email, data.role, deptIds, data.password || '');
+  var newUser = createUser(data.name, data.email, data.role, deptIds, data.password || '', data.mattermostUsername || '');
   return { success: true, user: newUser };
 }
 
@@ -1811,11 +1824,12 @@ function updateEmployee(data) {
   
   // Prepare update object
   var updates = {
-    name: data.name,
-    email: data.email,
-    role: data.role,
-    department_id: deptIds.length > 0 ? JSON.stringify(deptIds) : '',
-    updated_at: _now()
+    name:                data.name,
+    email:               data.email,
+    role:                data.role,
+    department_id:       deptIds.length > 0 ? JSON.stringify(deptIds) : '',
+    mattermost_username: data.mattermostUsername || '',
+    updated_at:          _now()
   };
   
   // Only update password if provided
@@ -2212,6 +2226,108 @@ function deleteTaskDay(dateStr) {
   });
 }
 
+// Withdraw (cancel) a submitted telework day report — employee only, submitted status only
+function withdrawTeleworkDay(payload) {
+  return _withLock('withdrawTeleworkDay', function() {
+    var user = getCurrentUser();
+    if (!user) return { error: 'Unauthorized' };
+    if (!payload || !payload.date || !payload.startDate || !payload.endDate) {
+      return { error: 'データが不足しています' };
+    }
+
+    var sheet = getSheet(SHEET_REPORTS);
+    var data  = sheet.getDataRange().getValues();
+    var empCol    = REPORT_H.indexOf('employee_id');
+    var reqCol    = REPORT_H.indexOf('request_date');
+    var startCol  = REPORT_H.indexOf('start_date');
+    var endCol    = REPORT_H.indexOf('end_date');
+    var statusCol = REPORT_H.indexOf('status');
+    var idCol     = REPORT_H.indexOf('id');
+
+    var targetRow = -1;
+    var targetId  = null;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][empCol])        === String(user.id) &&
+          _dateStr(data[i][reqCol])      === String(payload.date) &&
+          _dateStr(data[i][startCol])    === String(payload.startDate) &&
+          _dateStr(data[i][endCol])      === String(payload.endDate)) {
+        var status = String(data[i][statusCol]);
+        if (status === 'submitted') {
+          targetRow = i;
+          targetId  = String(data[i][idCol]);
+          break;
+        } else {
+          return { error: 'この申請は取り下げできません（ステータス: ' + status + '）' };
+        }
+      }
+    }
+
+    if (targetRow === -1) {
+      return { error: 'レコードが見つかりません' };
+    }
+
+    sheet.deleteRow(targetRow + 1);
+
+    var approvals = getApprovalsByReport(targetId);
+    approvals.forEach(function(approval) {
+      _deleteRowById(SHEET_APPROVALS, approval.id);
+    });
+
+    _invalidateCache(CACHE_KEY_REPORTS);
+    _invalidateCache(CACHE_KEY_APPROVALS);
+    _invalidateApprovalMap();
+    return { success: true, message: '取り下げしました' };
+  });
+}
+
+// Withdraw (cancel) a submitted task report day — employee only, submitted status only
+function withdrawTaskReport(dateStr) {
+  return _withLock('withdrawTaskReport', function() {
+    var user = getCurrentUser();
+    if (!user) return { error: 'Unauthorized' };
+    if (!dateStr) return { error: 'データが不足しています' };
+
+    var sheet = getSheet(SHEET_TASK_REPORTS);
+    var data  = sheet.getDataRange().getValues();
+    var empCol    = TASK_REPORT_H.indexOf('employee_id');
+    var dateCol   = TASK_REPORT_H.indexOf('report_date');
+    var statusCol = TASK_REPORT_H.indexOf('status');
+    var idCol     = TASK_REPORT_H.indexOf('id');
+
+    var targetRow = -1;
+    var targetId  = null;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][empCol])     === String(user.id) &&
+          _dateStr(data[i][dateCol])  === String(dateStr)) {
+        var status = String(data[i][statusCol]);
+        if (status === 'submitted') {
+          targetRow = i;
+          targetId  = String(data[i][idCol]);
+          break;
+        } else {
+          return { error: 'この日報は取り下げできません（ステータス: ' + status + '）' };
+        }
+      }
+    }
+
+    if (targetRow === -1) {
+      return { error: 'レコードが見つかりません' };
+    }
+
+    sheet.deleteRow(targetRow + 1);
+
+    var approvals = getApprovalsByReport(targetId);
+    approvals.forEach(function(approval) {
+      _deleteRowById(SHEET_APPROVALS, approval.id);
+    });
+
+    _invalidateCache(CACHE_KEY_TASK_REPORTS);
+    _invalidateCache(CACHE_KEY_APPROVALS);
+    _invalidateApprovalMap();
+    return { success: true, message: '取り下げしました' };
+  });
+}
+
 // Get pending task reports for reviewers/managers
 function getPendingTaskReports() {
   var user = getCurrentUser();
@@ -2335,6 +2451,7 @@ function reviewTaskReportAction(reportId, comment) {
         reportDate: report.report_date,
         employeeName: employee.name,
         employeeEmail: employee.email,
+        mattermostUsername: employee.mattermost_username || null,
         approverName: user.name,
         decision: 'reviewed',
         reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
@@ -2383,6 +2500,7 @@ function approveTaskReportAction(reportId, comment) {
           reportDate: report.report_date,
           employeeName: employee.name,
           employeeEmail: employee.email,
+          mattermostUsername: employee.mattermost_username || null,
           approverName: user.name,
           decision: 'approved',
           reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
@@ -2428,6 +2546,7 @@ function rejectTaskReportAction(reportId, comment) {
           reportDate: report.report_date,
           employeeName: employee.name,
           employeeEmail: employee.email,
+          mattermostUsername: employee.mattermost_username || null,
           approverName: user.name,
           decision: 'rejected',
           reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
@@ -2535,6 +2654,10 @@ function getAdminTeleworkReportsPaginated(options) {
   
   options = options || {};
   var reports = getReportsInDateRange(options.startDate, options.endDate, options.employeeId);
+  
+  // Filter out draft status records - only show submitted/reviewed/approved/rejected
+  reports = reports.filter(function(r) { return r.status !== 'draft'; });
+  
   var users   = getAllUsers();
   var depts   = getAllDepartments();
   
@@ -2634,6 +2757,10 @@ function getAdminTaskReportsPaginated(options) {
   
   options = options || {};
   var reports = getTaskReportsInDateRange(options.startDate, options.endDate, options.employeeId);
+  
+  // Filter out draft status records - only show submitted/reviewed/approved/rejected
+  reports = reports.filter(function(r) { return r.status !== 'draft'; });
+  
   var users   = getAllUsers();
   var depts   = getAllDepartments();
   

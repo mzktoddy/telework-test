@@ -67,7 +67,7 @@
   <!-- Header -->
   <div class="mb-6 flex items-start justify-between">
     <div>
-      <h1 class="text-3xl font-bold text-slate-900 mb-1">管理者画面</h1>
+      <h1 class="text-3xl font-bold text-slate-900 mb-1">申請履歴</h1>
       <p class="text-sm text-slate-500">全従業員の「申請履歴」と「日報報告」の管理が行えます。</p>
     </div>
     <div class="flex gap-3">
@@ -125,7 +125,6 @@
         class="h-9 px-3 min-w-[140px] border border-slate-300 rounded-lg text-sm
                focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-700">
         <option value="">全ステータス</option>
-        <option value="draft">未作成</option>
         <option value="submitted">申請中</option>
         <option value="reviewed">照査済</option>
         <option value="approved">承認済み</option>
@@ -288,8 +287,8 @@ var _filteredRows = [];
 var _exportLink   = null;
 
 // Pagination state
-var _telePagination = { page: 1, pageSize: 10, totalPages: 1, totalItems: 0 };
-var _taskPagination = { page: 1, pageSize: 10, totalPages: 1, totalItems: 0 };
+var _telePagination = { page: 1, pageSize: 20, totalPages: 1, totalItems: 0 };
+var _taskPagination = { page: 1, pageSize: 20, totalPages: 1, totalItems: 0 };
 var _isLoading = false;
 var _searchDebounceTimer = null;
 
@@ -417,7 +416,7 @@ function loadDataFromServer(page, rebuildWeekOptions) {
     weekSundayKey: document.getElementById('weekFilter').value || null,
     employeeName: document.getElementById('searchName').value.trim() || null,
     page: page,
-    pageSize: 10
+    pageSize: 20
   };
   
   document.getElementById('tableLoading').classList.remove('hidden');

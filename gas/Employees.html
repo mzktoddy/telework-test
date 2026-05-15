@@ -126,6 +126,12 @@
         <input id="newEmail" type="email" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
       </div>
       <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1">Mattermostユーザー名</label>
+        <input id="newMattermostUsername" type="text" placeholder="@username"
+          class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-mono" />
+        <p class="text-xs text-slate-400 mt-0.5">メールアドレス入力後に自動入力されます（編集可）</p>
+      </div>
+      <div>
         <label class="text-xs font-medium text-slate-700 block mb-2">部署（複数選択可能）</label>
         <div id="newDept" class="w-full max-h-40 overflow-y-auto border border-slate-300 rounded-md p-2 bg-white space-y-1"></div>
       </div>
@@ -475,6 +481,9 @@ function openAddModal() {
   ['newName','newEmail','newPassword'].forEach(function (id) {
     document.getElementById(id).value = '';
   });
+  var mmField = document.getElementById('newMattermostUsername');
+  mmField.value = '';
+  mmField.removeAttribute('data-user-edited');
   // Uncheck all department checkboxes
   var checkboxes = document.querySelectorAll('.dept-checkbox');
   checkboxes.forEach(function(cb) { cb.checked = false; });
@@ -490,6 +499,9 @@ function openEditModal(employeeId) {
   document.getElementById('saveBtn').textContent = '更新する';
   document.getElementById('newName').value = emp.name || '';
   document.getElementById('newEmail').value = emp.email || '';
+  var mmField = document.getElementById('newMattermostUsername');
+  mmField.value = emp.mattermost_username || '';
+  mmField.removeAttribute('data-user-edited'); // allow auto-update when email changes
   
   // Set department checkboxes
   var checkboxes = document.querySelectorAll('.dept-checkbox');
@@ -510,6 +522,8 @@ function closeAddModal() {
   ['newName','newEmail','newPassword'].forEach(function (id) {
     document.getElementById(id).value = '';
   });
+  var mmField = document.getElementById('newMattermostUsername');
+  if (mmField) { mmField.value = ''; mmField.removeAttribute('data-user-edited'); }
 }
 
 function saveEmployee() {
@@ -525,6 +539,7 @@ function saveEmployee() {
   
   var role  = document.getElementById('newRole').value;
   var pass  = document.getElementById('newPassword').value;
+  var mattermostUsername = document.getElementById('newMattermostUsername').value.trim();
 
   if (!name || !email || !role) {
     showModalError('氏名・メールアドレス・ロールは必須です');
@@ -550,7 +565,7 @@ function saveEmployee() {
         btn.disabled = false; btn.textContent = '更新する';
         showModalError('エラーが発生しました');
       })
-      .updateEmployee({ id: editingEmployeeId, name: name, email: email, departments: selectedDepts, role: role, password: pass });
+      .updateEmployee({ id: editingEmployeeId, name: name, email: email, departments: selectedDepts, role: role, password: pass, mattermostUsername: mattermostUsername });
   } else {
     // Add new employee
     google.script.run
@@ -565,7 +580,7 @@ function saveEmployee() {
         btn.disabled = false; btn.textContent = '追加する';
         showModalError('エラーが発生しました');
       })
-      .addEmployee({ name: name, email: email, departments: selectedDepts, role: role, password: pass });
+      .addEmployee({ name: name, email: email, departments: selectedDepts, role: role, password: pass, mattermostUsername: mattermostUsername });
   }
 }
 
@@ -595,6 +610,18 @@ function reloadEmployees() {
     })
     .getAllEmployees();
 }
+
+// ── Auto-populate Mattermost username from email ─────────────
+document.getElementById('newEmail').addEventListener('input', function () {
+  var mmField = document.getElementById('newMattermostUsername');
+  if (mmField.getAttribute('data-user-edited') === 'true') return;
+  var atIdx = this.value.indexOf('@');
+  mmField.value = atIdx > 0 ? '@' + this.value.substring(0, atIdx) : (this.value ? '@' + this.value : '');
+});
+
+document.getElementById('newMattermostUsername').addEventListener('input', function () {
+  this.setAttribute('data-user-edited', 'true');
+});
 
 // ── Logout ────────────────────────────────────────────────────
 function logout() {

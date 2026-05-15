@@ -354,11 +354,10 @@ function sendMattermostMessage(notificationData, channel) {
     var date = new Date(notificationData.reportDate);
     var year = Utilities.formatDate(date, "Asia/Tokyo", "yyyy");
     
-    // Extract username from email for mention (e.g., "y.toki@example.com" -> "y.toki")
-    var mattermostUsername = notificationData.employeeEmail ? 
-                            notificationData.employeeEmail.split('@')[0].replace('.', '-') : 
-                            'user';
-    //var mattermostUsername　= 'myintzuko';
+    // Use stored mattermost_username if available; otherwise derive from email
+    var mattermostUsername = (notificationData.mattermostUsername && notificationData.mattermostUsername.trim())
+      ? notificationData.mattermostUsername.replace(/^@/, '') // strip leading @ if present
+      : (notificationData.employeeEmail ? notificationData.employeeEmail.split('@')[0].replace('.', '-') : 'user');
     
     // Determine status message
     var statusText = notificationData.decision === 'approved' ? '承認' : 
@@ -675,7 +674,7 @@ function setupDailyTrigger() {
     ScriptApp.newTrigger("sendDailyPendingNotifications") // Name of function to run
       .timeBased()
       .onWeekDay(day)
-      .atHour(15) // Set hour (0-23)
+      .atHour(9) // Set hour (0-23)
       .inTimezone('Asia/Tokyo')
       .create();
   });

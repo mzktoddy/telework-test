@@ -21,11 +21,37 @@ function getGwsSessionEmail() {
 //    Reads only from the 30-min user cache written by loginUser() /
 //    loginWithGoogle(). Does NOT call Session.getActiveUser(), so the
 //    cache must already exist (set at login time).
+var SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+var CACHE_TTL_S    = 21600;               // 6 hours — CacheService hard limit
+
 function getCurrentUser() {
   var cache = CacheService.getUserCache();
+
+  // Fast path: still in cache
   var cached = cache.get('gasUser');
-  if (!cached) return null;
-  try { return JSON.parse(cached); } catch (e) { cache.remove('gasUser'); return null; }
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) {}
+  }
+
+  // Slow path: cache expired — check UserProperties (survives cache eviction)
+  var props = PropertiesService.getUserProperties();
+  var stored = props.getProperty('gasUser');
+  if (!stored) return null;
+
+  var session;
+  try { session = JSON.parse(stored); } catch (e) { props.deleteProperty('gasUser'); return null; }
+
+  // Validate 24-hour window
+  if (!session.loginTime || (Date.now() - session.loginTime) > SESSION_TTL_MS) {
+    props.deleteProperty('gasUser');
+    return null;
+  }
+
+  // Repopulate cache so next call is fast again
+  var user = { id: session.id, email: session.email, name: session.name,
+               role: session.role, department_id: session.department_id };
+  try { cache.put('gasUser', JSON.stringify(user), CACHE_TTL_S); } catch (e) {}
+  return user;
 }
 
 // ── Called from Google Workspace button in Login.html ────────
@@ -113,8 +139,15 @@ function _buildSession(user, redirectPage) {
     role:          user.role,
     department_id: user.department_id,
   };
-  CacheService.getUserCache().put('gasUser', JSON.stringify(info), 1800);
-  
+  // Persist for up to 24 hours using UserProperties (survives cache eviction)
+  var sessionInfo = { id: info.id, email: info.email, name: info.name,
+                      role: info.role, department_id: info.department_id,
+                      loginTime: Date.now() };
+  PropertiesService.getUserProperties().setProperty('gasUser', JSON.stringify(sessionInfo));
+
+  // Also populate fast-path cache (max 6 h)
+  try { CacheService.getUserCache().put('gasUser', JSON.stringify(info), CACHE_TTL_S); } catch (e) {}
+
   // Redirect to originally requested page, or dashboard as default
   var page = redirectPage || 'dashboard';
   return {
@@ -126,6 +159,7 @@ function _buildSession(user, redirectPage) {
 // ── Called from Sidebar logout button ────────────────────────
 function logoutUser() {
   CacheService.getUserCache().remove('gasUser');
+  PropertiesService.getUserProperties().deleteProperty('gasUser');
   return { redirectUrl: ScriptApp.getService().getUrl() + '?page=login' };
 }
 

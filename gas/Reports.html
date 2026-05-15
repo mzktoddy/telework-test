@@ -99,8 +99,8 @@
       <button id="submitWeekBtn" onclick="submitWeek()"
         class="w-full h-11 px-6 bg-slate-900 hover:bg-slate-800 text-white text-lg font-medium rounded-full transition-colors flex items-center justify-center gap-2">
         <span id="submitBtnText">申請</span>
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+        <svg id="submitBtnIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path id="submitBtnIconPath" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
         </svg>
       </button>
     </div>
@@ -268,7 +268,34 @@ function makeFreshDayData() {
   });
 }
 
+// ── Skeleton loading state for day cards ─────────────────────
+function _showDayCardSkeletons() {
+  var skeletonHtml = '';
+  for (var _s = 0; _s < 7; _s++) {
+    skeletonHtml +=
+      '<div class="flex items-start justify-between p-4 bg-white border border-slate-200 rounded-lg animate-pulse">' +
+        '<div class="flex items-center gap-4 flex-1">' +
+          '<div class="border-slate-200 border-2 bg-slate-100 rounded-md min-w-16 h-16"></div>' +
+          '<div class="h-5 w-16 bg-slate-200 rounded-full"></div>' +
+        '</div>' +
+      '</div>';
+  }
+  document.getElementById('dayCards').innerHTML = skeletonHtml;
+  // Disable submit button while loading
+  var submitBtn     = document.getElementById('submitWeekBtn');
+  var submitBtnText = document.getElementById('submitBtnText');
+  if (submitBtnText) {
+    submitBtnText.innerHTML =
+      '<div class="flex items-center justify-center gap-2">' +
+        '<div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>' +
+        '読み込み中...' +
+      '</div>';
+  }
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('opacity-75', 'cursor-not-allowed'); }
+}
+
 // ── Load reports on page load ─────────────────────────────────
+_showDayCardSkeletons(); // show skeletons while waiting for server data
 google.script.run
   .withSuccessHandler(function (data) {
     if (data && !data.error) myReports = data;
@@ -284,16 +311,18 @@ weekSel.addEventListener('change', function () {
   document.getElementById('detailDateLabel').textContent = '日を選択してください';
   document.getElementById('detailPanel').innerHTML =
     '<p class="text-sm text-slate-400">左のカレンダーから申請する日を選択してください。</p>';
-  renderWeek();  // render immediately from cached myReports
-  // Also refetch from server to ensure data is current
+  _showDayCardSkeletons(); // show skeletons while refetching
   google.script.run
     .withSuccessHandler(function (data) {
       if (data && !data.error) {
         myReports = data;
-        dayData = makeFreshDayData(); // reset so renderWeek picks up server data
+        dayData = makeFreshDayData();
+        renderWeek();
+      } else {
         renderWeek();
       }
     })
+    .withFailureHandler(function () { renderWeek(); })
     .getMyReports();
 });
 
@@ -368,17 +397,32 @@ function renderWeek() {
     container.appendChild(makeDayCard(d, DAY_SHORTS[i], weekStatus, i, weekReport));
   }
   
-  // Update submit button text - show 再申請 if any day has rejected status
+  // Update submit button — 申請 / 再申請 / 取り下げ
+  var submitBtn     = document.getElementById('submitWeekBtn');
   var submitBtnText = document.getElementById('submitBtnText');
-  if (submitBtnText) {
-    var hasRejected = false;
+  if (submitBtnText && submitBtn) {
+    // Always re-enable the button (may have been disabled by skeleton loader)
+    submitBtn.disabled = false;
+    submitBtn.classList.remove('opacity-75', 'cursor-not-allowed');
+    var hasRejected  = false;
+    var hasSubmitted = false;
     for (var j = 0; j < 7; j++) {
-      if (dayData[j].savedStatus === 'rejected') {
-        hasRejected = true;
-        break;
-      }
+      if (dayData[j].savedStatus === 'rejected')  hasRejected  = true;
+      if (dayData[j].savedStatus === 'submitted') hasSubmitted = true;
     }
-    submitBtnText.textContent = hasRejected ? '再申請' : '申請';
+    var iconPath = document.getElementById('submitBtnIconPath');
+    if (hasSubmitted && !hasRejected) {
+      // Week is pending approval → show 取り下げ
+      submitBtnText.textContent = '取り下げ';
+      submitBtn.className = 'w-full h-11 px-6 bg-slate-900 hover:bg-slate-800 text-white text-lg font-medium rounded-full transition-colors flex items-center justify-center gap-2';
+      submitBtn.setAttribute('onclick', 'withdrawSubmittedWeek()');
+      if (iconPath) iconPath.setAttribute('d', 'M6 18L18 6M6 6l12 12');
+    } else {
+      submitBtnText.textContent = hasRejected ? '再申請' : '申請';
+      submitBtn.className = 'w-full h-11 px-6 bg-slate-900 hover:bg-slate-800 text-white text-lg font-medium rounded-full transition-colors flex items-center justify-center gap-2';
+      submitBtn.setAttribute('onclick', 'submitWeek()');
+      if (iconPath) iconPath.setAttribute('d', 'M13 7l5 5m0 0l-5 5m5-5H6');
+    }
   }
 }
 
@@ -1027,17 +1071,21 @@ function submitWeek() {
       if (count > 0) {
         alert('✅ ' + count + '日分の' + actionText + 'を送信しました\n\nステータス: 申請中 (承認待ち)');
       }
-      if (submitBtnText) submitBtnText.textContent = actionText;
-      btn.disabled  = false;
-      btn.classList.remove('opacity-75', 'cursor-not-allowed');
-      
-      // Fetch latest data from server to sync
+      // Keep button disabled/spinning while refreshing — renderWeek() will set the final state
+      if (submitBtnText) {
+        submitBtnText.innerHTML = '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>読み込み中...</div>';
+      }
       google.script.run
         .withSuccessHandler(function (data) {
-          if (data && !data.error) {
-            myReports = data;
-            renderWeek();
-          }
+          btn.disabled = false;
+          btn.classList.remove('opacity-75', 'cursor-not-allowed');
+          if (data && !data.error) myReports = data;
+          renderWeek();
+        })
+        .withFailureHandler(function () {
+          btn.disabled = false;
+          btn.classList.remove('opacity-75', 'cursor-not-allowed');
+          renderWeek();
         })
         .getMyReports();
     })
@@ -1051,6 +1099,84 @@ function submitWeek() {
       alert('申請に失敗しました。もう一度お試しください。');
     })
     .submitWeekReport(weekPayload);
+}
+
+// ── Withdraw all submitted days for the current week ─────────
+function withdrawSubmittedWeek() {
+  var offset = parseInt(weekSel.value) || 0;
+  var sun    = getSundayOfWeek(offset);
+  var sat    = new Date(sun); sat.setDate(sun.getDate() + 6);
+
+  var submittedDays = [];
+  for (var wi = 0; wi < 7; wi++) {
+    if (dayData[wi].savedStatus === 'submitted') {
+      var wd = new Date(sun); wd.setDate(sun.getDate() + wi);
+      submittedDays.push({ idx: wi, dateStr: isoDate(wd) });
+    }
+  }
+  if (submittedDays.length === 0) {
+    alert('取り下げる申請がありません。');
+    return;
+  }
+  if (!confirm('申請中の ' + submittedDays.length + '日分 を取り下げますか？\n\nこの操作は取り消せません。')) {
+    return;
+  }
+
+  var btn = document.getElementById('submitWeekBtn');
+  var submitBtnText = document.getElementById('submitBtnText');
+  if (submitBtnText) submitBtnText.innerHTML =
+    '<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>取り下げ中...</div>';
+  if (btn) { btn.disabled = true; btn.classList.add('opacity-75', 'cursor-not-allowed'); }
+
+  var errors  = [];
+  var pending = submittedDays.length;
+
+  function _onAllWithdrawn() {
+    if (btn) { btn.disabled = false; btn.classList.remove('opacity-75', 'cursor-not-allowed'); }
+    if (errors.length > 0) {
+      alert('一部の取り下げに失敗しました:\n' + errors.join('\n'));
+    } else {
+      alert('✅ ' + submittedDays.length + '日分の申請を取り下げました');
+    }
+    google.script.run
+      .withSuccessHandler(function (data) {
+        if (data && !data.error) {
+          myReports = data;
+          dayData   = makeFreshDayData();
+          renderWeek();
+        }
+      })
+      .getMyReports();
+  }
+
+  submittedDays.forEach(function (day) {
+    var payload = {
+      startDate: isoDate(sun),
+      endDate:   isoDate(sat),
+      date:      day.dateStr,
+    };
+    dayData[day.idx].savedStatus = null;
+    dayData[day.idx].edited      = false;
+
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r && r.error) {
+          errors.push(day.dateStr + ': ' + r.error);
+          dayData[day.idx].savedStatus = 'submitted';
+          dayData[day.idx].edited      = true;
+        }
+        pending--;
+        if (pending === 0) _onAllWithdrawn();
+      })
+      .withFailureHandler(function (err) {
+        errors.push(day.dateStr + ': ' + (err && err.message ? err.message : '不明なエラー'));
+        dayData[day.idx].savedStatus = 'submitted';
+        dayData[day.idx].edited      = true;
+        pending--;
+        if (pending === 0) _onAllWithdrawn();
+      })
+      .withdrawTeleworkDay(payload);
+  });
 }
 
 // ── Logout ────────────────────────────────────────────────────
