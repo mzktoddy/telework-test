@@ -1,8 +1,8 @@
 // ============================================================
-//  Code.gs — Main entry point, routing, template helpers
+//  Code.gs — エントリーポイント・ルーティング・テンプレートヘルパー
 //
-//  STEP 1: Set SPREADSHEET_ID to your Google Spreadsheet ID.
-//          (Create a blank sheet → copy the ID from the URL)
+//  導入手順: SPREADSHEET_ID に Google スプレッドシートの ID を設定する
+//            （空白のシートを作成→ URL から ID をコピー）
 // ============================================================
 const scriptProperties = PropertiesService.getScriptProperties();
 const SPREADSHEET_ID = scriptProperties.getProperty('SPREADSHEET_ID');//
@@ -10,69 +10,68 @@ const REDMINE_URL = scriptProperties.getProperty('REDMINE_URL');
 const API_KEY = scriptProperties.getProperty('API_KEY');//
 const MATTERMOST_WEBHOOK_URL = scriptProperties.getProperty('MATTERMOST_WEBHOOK_URL');//
 
-// ── Entry point ──────────────────────────────────────────────
+// ── エントリーポイント ──────────────────────────────────────────
 //
-//  Auth flow:
-//    getCurrentUser() reads ONLY from the 30-min cache (set by
-//    loginUser / loginWithGoogle in Auth.gs). It never calls
-//    Session.getActiveUser(), so unauthenticated visits always
-//    land on the Login page.
+//  認証フロー:
+//    getCurrentUser() は loginUser() / loginWithGoogle() がログイン時に
+//    書き込んだキャッシュのみを参照する。Session.getActiveUser() は呼び出さないため、
+//    未認証のアクセスは常にログインページに遷移する。
 //
-//  Logout flow:
-//    logoutUser() clears the cache then sends ?page=login.
-//    We handle that BEFORE the auth check so the Login page is
-//    always shown even if a stale cache entry survives.
+//  ログアウトフロー:
+//    logoutUser() がキャッシュを削除し、?page=login へ遷移する。
+//    認証チェックより前に処理するため、古いキャッシュが残存していても
+//    ログインページが必ず表示される。
 function doGet(e) {
   var page = (e && e.parameter && e.parameter.page) ? e.parameter.page : '';
 
-  // Always show Login when explicitly requested (e.g. after logout)
+  // 明示的にログインが要求された場合は常にログインページを表示する（ログアウト後も含む）
   if (page === 'login') {
     return renderPage('Login', null);
   }
 
-  // Cache-only auth check — no GWS session fallback
+  // キャッシュのみで認証を確認する（GWS セッションのフォールバックなし）
   var user = getCurrentUser();
   if (!user) {
-    // Pass the requested page to Login so it can redirect after authentication
+    // 認証後にリダイレクトできるよう要求ページをログイン画面に渡す
     return renderPage('Login', null, page);
   }
 
-  // No page param → default to dashboard
+  // ページ指定なし → デフォルトはダッシュボードを表示する
   if (!page) {
     return renderPage('Dashboard', user);
   }
 
-  // Route to appropriate page with role-based access control
+  // ロールベースのアクセス制御を適用して各ページへルーティングする
   return _routePage(page, user);
 }
 
-// ── Route to page with role-based access control ─────────────
+// ── ロールベースのアクセス制御を適用してページへルーティングする ────────
 function _routePage(page, user) {
-  // Define page access rules: page -> allowed roles (empty array = all roles)
+  // ページごとのアクセスルール：ページ名 → 許可ロールの配列（空配列 = 全ロール許可）
   var pageAccess = {
-    'dashboard':     [],  // All roles
-    'reports':       [],  // All roles
-    'task_report':   [],  // All roles
-    'calendar':      [],  // All roles
+    'dashboard':     [],  // 全ロール許可
+    'reports':       [],  // 全ロール許可
+    'task_report':   [],  // 全ロール許可
+    'calendar':      [],  // 全ロール許可
     'approve':       ['reviewer', 'manager', 'admin'],
     'employees':     ['admin'],
     'admin_history': ['admin']
   };
 
-  // Check if page exists in routing
+  // ルーティング対象のページかどうか確認する
   if (!pageAccess.hasOwnProperty(page)) {
-    return renderPage('Dashboard', user);  // Unknown page → dashboard
+    return renderPage('Dashboard', user);  // 未知のページ → ダッシュボードへ遷移
   }
 
-  // Check role-based access
+  // ロールによるアクセス権限を確認する
   var allowedRoles = pageAccess[page];
   var hasAccess = allowedRoles.length === 0 || allowedRoles.indexOf(user.role) >= 0;
 
   if (!hasAccess) {
-    return renderPage('Dashboard', user);  // No access → dashboard
+    return renderPage('Dashboard', user);  // アクセス権限なし → ダッシュボードへ遷移
   }
 
-  // Capitalize first letter for template name
+  // テンプレート名を生成する（スネークケース → パスカルケース）
   var templateName = page.split('_').map(function(word) {
     return word.charAt(0).toUpperCase() + word.slice(1);
   }).join('');
@@ -80,14 +79,13 @@ function _routePage(page, user) {
   return renderPage(templateName, user);
 }
 
-// ── Template renderer ────────────────────────────────────────
+// ── テンプレートレンダラー ────────────────────────────────────
 function renderPage(templateName, user, redirectPage) {
   var tmpl = HtmlService.createTemplateFromFile(templateName);
-  // Encode to be safe inside a single-quoted HTML attribute
-  // (JSON uses double quotes, so single-quote wrapping in the HTML is safe)
+  // JSON はダブルクォートを使用するため、HTML 属性のシングルクォートで安全に埋め込むことができる
   tmpl.user         = user ? JSON.stringify(user) : 'null';
   tmpl.scriptUrl    = ScriptApp.getService().getUrl();
-  tmpl.redirectPage = redirectPage || ''; // Pass the originally requested page
+  tmpl.redirectPage = redirectPage || ''; // 元々要求されたページを渡す
   return tmpl
     .evaluate()
     .setTitle('在宅勤務報告システム')
@@ -95,57 +93,57 @@ function renderPage(templateName, user, redirectPage) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-// ── Template include helper ──────────────────────────────────
+// ── テンプレートインクルードヘルパー ───────────────────────────────
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
-// ── Get image from Google Drive and convert to base64 ────────
+// ── Google ドライブの画像を base64 変換して取得する（現在未使用） ────
 // function getImageAsBase64(fileId) {
 //   try {
-//     // Get the file from Google Drive
+//     // Google ドライブからファイルを取得する
 //     var fileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; 
 //     var file = DriveApp.getFileById(fileId);
     
-//     // Get the blob (file content)
+//     // Blob（ファイル内容）を取得する
 //     var blob = file.getBlob();
     
-//     // Get the MIME type (e.g., image/png, image/jpeg)
+//     // MIME タイプを取得する（例: image/png、image/jpeg）
 //     var mimeType = blob.getContentType();
     
-//     // Convert to base64
+//     // base64 に変換する
 //     var base64Data = Utilities.base64Encode(blob.getBytes());
     
-//     // Return as data URI
+//     // データ URI として返す
 //     return 'data:' + mimeType + ';base64,' + base64Data;
 //   } catch (error) {
-//     Logger.log('Error getting image: ' + error.toString());
+//     Logger.log('画像取得エラー: ' + error.toString());
 //     return null;
 //   }
 // }
 
-// ── Fetch open Redmine issues assigned to current user ────────
-// Strategy: Look up the Redmine user ID by the logged-in user's email,
-// then query open issues assigned to that user.
-// The API_KEY is a shared admin key, so assigned_to_id=me won't work.
+// ── ログイン中ユーザーに割り当てられた Redmine オープンチケットを取得する ─
+// 戦略: ログインユーザーのメールアドレスから Redmine ユーザー ID を特定し、
+// そのユーザーに割り当てられたオープンチケットを取得する。
+// API_KEY は共有の管理者キーのため、assigned_to_id=me は使用できない。
 
 function getOpenTicketsByEmail(email) {
-  // Step 1: Find user by email
+  // ステップ1: メールアドレスから Redmine ユーザーを検索する
   const userId = getUserIdByEmail(email);
   
   if (!userId) {
-    Logger.log("User not found for email: " + email);
+    Logger.log('該当ユーザーが見つかりません: ' + email);
     return [];
   }
 
-  Logger.log("Found user ID: " + userId);
+  Logger.log('ユーザー ID を導出しました: ' + userId);
 
-  // Step 2: Get open issues for that user
+  // ステップ2: そのユーザーのオープンチケットを取得する
   const issues = getOpenIssuesByUserId(userId);
   return issues;
 }
 
-// --- Find user ID by email ---
+// ─── メールアドレスから Redmine ユーザー ID を検索する ───
 function getUserIdByEmail(email) {
   const url = `${REDMINE_URL}/users.json?limit=100`;
 
@@ -159,16 +157,16 @@ function getUserIdByEmail(email) {
 
   const data = JSON.parse(response.getContentText());
 
-  // Search for matching email
+  // メールアドレスが一致するユーザーを検索する
   const matched = data.users.find(user => user.mail === email);
   
   return matched ? matched.id : null;
 }
 
-// --- Get open issues by user ID ---
+// ─── Redmine ユーザー ID に割り当てられたオープンチケットを取得する ───
 function getOpenIssuesByUserId(userId) {
-  const todayJST = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd");
-  Logger.log("Searching issues until (JST): " + todayJST);
+  const todayJST = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  Logger.log('検索対象日時（JST）: ' + todayJST);
 
 
   let allIssues = [];
@@ -196,7 +194,7 @@ function getOpenIssuesByUserId(userId) {
 
     if (totalCount === null) {
       totalCount = data.total_count;
-      Logger.log("Total open issues: " + totalCount);
+      Logger.log('オープンチケットの合計件数: ' + totalCount);
     }
 
     allIssues = allIssues.concat(data.issues);
@@ -207,13 +205,13 @@ function getOpenIssuesByUserId(userId) {
   return allIssues;
 }
 
-// ── Client-facing Redmine sync function ──────────────────────
-// Called by Reports.html syncRedmine(). Returns either:
+// ── Reports.html の syncRedmine() から呼び出されるクライアント向け Redmine 同期関数 ─
+// 戻り値:
 //   [{id, subject, project, tracker, status, priority, dueDate}, ...]
-//   { error: '<message>' }  on auth / lookup failure
+//   { error: '<メッセージ>' }  認証・検索失敗時
 function getRedmineTasks() {
   var user = getCurrentUser();
-  if (!user) return { error: 'Unauthorized' };
+  if (!user) return { error: '未認証' };
 
   var userId = getUserIdByEmail(user.email);
   if (!userId) {
@@ -235,20 +233,19 @@ function getRedmineTasks() {
   });
 }
 
-// ── Fetch Redmine time entries updated on a given date for a user ──
-// Returns issues where the user logged time on the given date,
-// with hours worked and progress percentage.
+// ── 指定日にユーザーが記録した Redmine 作業実績（タイムエントリ）を取得する ─
+// 記録内容: 作業ごとの合計時間と進捗率（%）
 function getRedmineTimeEntries(dateStr) {
   //const todayJST = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd");
   var user = getCurrentUser();
-  if (!user) return { error: 'Unauthorized' };
+  if (!user) return { error: '未認証' };
 
   var redmineUserId = getUserIdByEmail(user.email);
   if (!redmineUserId) {
     return { error: 'Redmineアカウントが見つかりません（メール: ' + user.email + '）' };
   }
 
-  // Fetch time entries for this user on the given date
+  // 該当日に記録されたタイムエントリを取得する
   var allEntries = [];
   var offset = 0;
   var limit = 100;
@@ -274,7 +271,7 @@ function getRedmineTimeEntries(dateStr) {
     offset += limit;
   } while (offset < totalCount);
 
-  // Group by issue and sum hours
+  // チケットごとに時間を集計する
   var issueMap = {};
   allEntries.forEach(function (entry) {
     if (!entry.issue) return;
@@ -287,7 +284,7 @@ function getRedmineTimeEntries(dateStr) {
     if (entry.comments) issueMap[iid].comments.push(entry.comments);
   });
 
-  // Fetch issue details (subject, project, done_ratio) for each
+  // 各チケットの詳細情報（タイトル・プロジェクト・進捗率）を取得する
   var result = [];
   var issueIds = Object.keys(issueMap);
   for (var i = 0; i < issueIds.length; i++) {
@@ -326,7 +323,7 @@ function getRedmineTimeEntries(dateStr) {
 }
 
 // function main() {
-//   const email = "kaiden@mamiya-its.co.jp";  // ← change this
+//   const email = "kaiden@mamiya-its.co.jp";  // ← 必要に応じて変更する
 //   const issues = getOpenTicketsByEmail(email);
 
 //   issues.forEach(issue => {
@@ -337,49 +334,49 @@ function getRedmineTimeEntries(dateStr) {
 
 
 /**
- * Send a telework report approval notification to Mattermost
- * @param {Object} notificationData - Notification details
- * @param {string} notificationData.reportType - 'telework' or 'task'
- * @param {string} notificationData.reportDate - Report date (YYYY-MM-DD)
- * @param {string} notificationData.weekTitle - Week title (e.g., '第14週') for telework reports
- * @param {string} notificationData.employeeName - Employee name
- * @param {string} notificationData.employeeEmail - Employee email (for mentioning)
- * @param {string} notificationData.approverName - Approver's name
- * @param {string} notificationData.decision - 'approved' or 'rejected'
- * @param {string} notificationData.reportUrl - URL to view the report
- * @param {string} channel - Mattermost channel (optional)
+ * Mattermost へ在宅勤務申請書の承認通知を送信する
+ * @param {Object} notificationData - 通知内容
+ * @param {string} notificationData.reportType - 'telework' または 'task'
+ * @param {string} notificationData.reportDate - 申請日（YYYY-MM-DD）
+ * @param {string} notificationData.weekTitle - 週タイトル（例：'第14週'）— 在宅勤務申請書のみ使用
+ * @param {string} notificationData.employeeName - 申請者氏名
+ * @param {string} notificationData.employeeEmail - 申請者メールアドレス（メンション用）
+ * @param {string} notificationData.approverName - 承認者氏名
+ * @param {string} notificationData.decision - 'approved' または 'rejected'
+ * @param {string} notificationData.reportUrl - 申請内容を確認する URL
+ * @param {string} channel - Mattermost チャンネル（任意）
  */
 function sendMattermostMessage(notificationData, channel) {
   try {
     var date = new Date(notificationData.reportDate);
     var year = Utilities.formatDate(date, "Asia/Tokyo", "yyyy");
     
-    // Use stored mattermost_username if available; otherwise derive from email
+    // mattermost_username が登録済みの場合はそれを使用し、なければメールアドレスから導出する
     var mattermostUsername = (notificationData.mattermostUsername && notificationData.mattermostUsername.trim())
-      ? notificationData.mattermostUsername.replace(/^@/, '') // strip leading @ if present
+      ? notificationData.mattermostUsername.replace(/^@/, '') // 先頭の @ は削除する
       : (notificationData.employeeEmail ? notificationData.employeeEmail.split('@')[0].replace('.', '-') : 'user');
     
-    // Determine status message
+    // 承認ステータスの表示ラベルを決定する
     var statusText = notificationData.decision === 'approved' ? '承認' : 
                      notificationData.decision === 'reviewed' ? '照査' : '差戻';
     
-    // System URL (you may need to update this to your actual system URL)
+    // システム URL（実際のシステム URL に必要に応じて変更してください）
     var systemUrl = notificationData.reportUrl || ScriptApp.getService().getUrl();
     
-    // Format message header based on report type
+    // 申請種別に応じてメッセージヘッダーを生成する
     var messageHeader;
     if (notificationData.reportType === 'telework') {
-      // Telework report: "2026年 第14週 在宅勤務許可申請書についてのお知らせ"
+      // 在宅勤務申請書の場合: 「2026年 第14週 在宅勤務許可申請書についてのお知らせ」
       messageHeader = year + '年 ' + notificationData.weekTitle + ' 在宅勤務許可申請書についてのお知らせ';
     } else {
-      // Task report: "2026/03/27（金） 在宅勤務報告書についてのお知らせ"
+      // 日報（作業報告書）の場合: 「2026/03/27（金） 在宅勤務報告書についてのお知らせ」
       var weekdays = ['日', '月', '火', '水', '木', '金', '土'];
       var formattedDate = Utilities.formatDate(date, "Asia/Tokyo", "yyyy/MM/dd") + 
                          '（' + weekdays[date.getDay()] + '）';
       messageHeader = formattedDate + ' 在宅勤務報告書についてのお知らせ';
     }
     
-    // Format message with proper structure
+    // 通知メッセージを組み立てる
     var message =  messageHeader + '\n\n';
     message += '@' + mattermostUsername + '\n';
     message += '**' + notificationData.approverName + '** により **' + statusText + '** されました。\n';
@@ -387,8 +384,7 @@ function sendMattermostMessage(notificationData, channel) {
     
     var payload = {
       text: message,
-      // channel: channel || 'daily-report',
-      channel: 'pj_anpic_dev',
+      channel: channel || 'daily-report',
       username: '日報管理システム                              ',
       icon_emoji: ':mop:',
     };
@@ -417,12 +413,12 @@ function sendMattermostMessage(notificationData, channel) {
 }
 
 /**
- * Test function to verify Mattermost notifications are working
- * Run this from the Google Apps Script editor to test the notification
+ * Mattermost 通知の動作確認用テスト関数
+ * GAS エディタから実行して通知の僕挙を検証する
  */
 function testMattermostNotification() {
-  // Test telework report notification
-  Logger.log('Testing telework report notification...');
+  // 在宅勤務申請書の通知テスト
+  Logger.log('在宅勤務申請書の通知テストを開始...');
   var teleworkData = {
     reportType: 'telework',
     reportDate: '2026-03-27',
@@ -437,13 +433,13 @@ function testMattermostNotification() {
   var result1 = sendMattermostMessage(teleworkData, 'daily-report');
   
   if (result1.success) {
-    Logger.log('✅ Telework report notification sent successfully!');
+    Logger.log('✅ 在宅勤務申請書の通知を送信しました！');
   } else {
-    Logger.log('❌ Telework report notification failed: ' + result1.error);
+    Logger.log('❌ 在宅勤務申請書の通知送信に失敗しました: ' + result1.error);
   }
   
-  // Test task report notification
-  Logger.log('Testing task report notification...');
+  // 日報（作業報告書）の通知テスト
+  Logger.log('日報の通知テストを開始...');
   var taskData = {
     reportType: 'task',
     reportDate: '2026-03-27',
@@ -457,9 +453,9 @@ function testMattermostNotification() {
   var result2 = sendMattermostMessage(taskData, 'daily-report');
   
   if (result2.success) {
-    Logger.log('✅ Task report notification sent successfully!');
+    Logger.log('✅ 日報の通知を送信しました！');
   } else {
-    Logger.log('❌ Task report notification failed: ' + result2.error);
+    Logger.log('❌ 日報の通知送信に失敗しました: ' + result2.error);
   }
   
   return { telework: result1, task: result2 };
@@ -483,9 +479,9 @@ function getUserList() {
 }
 
 
-// ── Tokyo weather forecast via Open-Meteo ────────────────────
-// Returns 7 days starting from today (Japan time).
-// Called from Dashboard.html via google.script.run.
+// ── Open-Meteo で東京の天気予報を取得する ────────────────────
+// 今日から 7 日間の天気予報を返す（日本時間ベース）。
+// Dashboard.html から google.script.run 経由で呼び出す。
 function getTokyoWeather() {
   var url =
     'https://api.open-meteo.com/v1/forecast' +
@@ -497,7 +493,7 @@ function getTokyoWeather() {
     var res  = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
     var json = JSON.parse(res.getContentText());
 
-    // Open-Meteo returns daily arrays starting from today — use directly
+    // Open-Meteo は今日からの日次データを配列で返す — そのまま使用する
     var days = [];
     for (var i = 0; i < 7; i++) {
       days.push({
@@ -514,28 +510,26 @@ function getTokyoWeather() {
 }
 
 // ============================================================
-//  Daily Pending Notification Scheduler
+//  日次未処理通知スケジューラー
 //
-//  SETUP: Run setupDailyTrigger() ONCE from the GAS editor.
-//         This installs a time-driven trigger that fires every
-//         day at 9 AM JST. Weekend days are skipped automatically.
+//  初期設定: GAS エディタから setupDailyTrigger() を一度実行する。
+//            毎日 9:00（JST）に起動する時刻トリガーが登録される。
+//            土日は自動スキップする。
 //
-//  LOGIC:
-//    • Reviewers  → notified about 'submitted' reports from
-//                   employees in their departments.
-//    • Managers   → notified about 'reviewer_approved' reports
-//                   from employees in their departments.
-//  Both telework_reports (在宅勤務許可申請書) and
-//  task_reports (在宅勤務報告書) are checked separately.
+//  ロジック:
+//    ・ 照査者 → 担当部署の従業員から提出された「提出済み」申請について通知。
+//    ・ 承認者 → 担当部署の従業員から提出された「照査承認済み」申請について通知。
+//  在宅勤務許可申請書（telework_reports）と
+//  在宅勤務報告書（task_reports）の両方を確認する。
 // ============================================================
 
 function sendDailyPendingNotifications() {
-  // Determine current weekday in Japan Standard Time
+  // 日本時間（JST）の曜日を確認する
   var now    = new Date();
   var jstNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
   var dow    = jstNow.getDay(); // 0=Sun … 6=Sat
   if (dow === 0 || dow === 6) {
-    Logger.log('Skipping: weekend');
+    Logger.log('土日のためスキップします');
     return;
   }
 
@@ -543,9 +537,16 @@ function sendDailyPendingNotifications() {
   var todayLabel  = Utilities.formatDate(jstNow, 'Asia/Tokyo', 'yyyy/MM/dd') +
                    '（' + WEEKDAYS_JP[dow] + '）';
 
-  var allUsers       = getAllUsers().filter(function(u) { return u.is_active; });
-  var allReports     = getAllReports();
-  var allTaskReports = getAllTaskReports();
+  // キャッシュをバイパスしてシートから直接データを読み込む（最新データを確保するため）
+  var allUsers = _sheetToObjects(getSheet(SHEET_USERS))
+    .map(function(u) {
+      u.is_active = (u.is_active === true || u.is_active === 'TRUE' || u.is_active === 1);
+      return u;
+    })
+    .filter(function(u) { return u.is_active; });
+  
+  var allReports     = _sheetToObjects(getSheet(SHEET_REPORTS));
+  var allTaskReports = _sheetToObjects(getSheet(SHEET_TASK_REPORTS));
   var systemUrl      = ScriptApp.getService().getUrl();
 
   // ── Helpers ──────────────────────────────────────────────
@@ -567,18 +568,18 @@ function sendDailyPendingNotifications() {
       .map(function(u) { return u.id; });
   }
 
-  // Mattermost @mention: use the part before @ in their email
+  // Mattermost @メンション: メールアドレスの @ 前の部分を使用する
   function getMention(user) {
     return user.email ? user.email.split('@')[0].replace(/\./g, '-') : (user.name || 'user');
   }
 
-  // Send one Mattermost webhook message per user
+  // ユーザーごとに Mattermost Webhook メッセージを送信する
   function notify(user, header, rows) {
     if (!rows.length) return;
     var mention = getMention(user);
     //var mention = "myintzuko"
 
-    // Markdown table
+    // Markdown テーブル
     var table = '| 書類 | 件数 |\n| :--- | ---: |\n';
     rows.forEach(function(r) { table += '| ' + r.label + ' | ' + r.count + ' 件 |\n'; });
 
@@ -592,24 +593,24 @@ function sendDailyPendingNotifications() {
         contentType:      'application/json',
         payload:          JSON.stringify({
           text:        text,
-          channel:     'pj_anpic_dev',
+          channel:     'daily-report',
           username:    '日報管理システム',
           icon_emoji:  ':mop:',
         }),
         muteHttpExceptions: true,
       });
-      Logger.log('Notified @' + mention);
+      Logger.log('@' + mention + ' へ通知しました');
     } catch (e) {
-      Logger.log('Failed to notify @' + mention + ': ' + e.toString());
+      Logger.log('@' + mention + ' への通知に失敗しました: ' + e.toString());
     }
   }
 
-  // ── Notify reviewers: 'submitted' reports ────────────────
+  // ── 照査者への通知: 'submitted'（提出済み）の申請 ─────────────
   allUsers.filter(function(u) { return u.role === 'reviewer'; })
     .forEach(function(reviewer) {
       var deptIds = getDeptIds(reviewer);
       if (!deptIds.length) return;
-      // Filter to ONLY child departments (exclude parent departments)
+      // 親部署を除く子部署のみを対象にする
       var childDeptIds = getChildDepartmentsOnly(deptIds);
       if (!childDeptIds.length) return;
       var empIds  = getEmpIdsForDepts(childDeptIds);
@@ -629,12 +630,12 @@ function sendDailyPendingNotifications() {
       notify(reviewer, '照査依頼が届いています。', rows);
     });
 
-  // ── Notify managers: 'reviewer_approved' reports ─────────
+  // ── 承認者への通知: 'reviewer_approved'（照査承認済み）の申請 ───
   allUsers.filter(function(u) { return u.role === 'manager'; })
     .forEach(function(manager) {
       var deptIds = getDeptIds(manager);
       if (!deptIds.length) return;
-      // Filter to ONLY child departments (exclude parent departments)
+      // 親部署を除く子部署のみを対象にする
       var childDeptIds = getChildDepartmentsOnly(deptIds);
       if (!childDeptIds.length) return;
       var empIds  = getEmpIdsForDepts(childDeptIds);
@@ -654,14 +655,13 @@ function sendDailyPendingNotifications() {
       notify(manager, '承認依頼が届いています。', rows);
     });
 
-  Logger.log('sendDailyPendingNotifications: done');
+  Logger.log('sendDailyPendingNotifications: 完了');
 }
 
-// ── Install the daily trigger (run once from GAS editor) ─────
-// Fires every day at 9 AM Asia/Tokyo; weekend skip is handled
-// inside sendDailyPendingNotifications().
+// ── 日次トリガーを登録する（GAS エディタから一度実行） ─────────────
+// 平日の毎日 9:00（JST）に発火する。土日のスキップは sendDailyPendingNotifications() 内で処理する。
 function setupDailyTrigger() {
-  // Remove any existing trigger to avoid duplicates
+  // 重複登録を防ぐため既存のトリガーを削除する
   const days = [
     ScriptApp.WeekDay.MONDAY,
     ScriptApp.WeekDay.TUESDAY,
@@ -671,22 +671,22 @@ function setupDailyTrigger() {
   ];
   
   days.forEach(day => {
-    ScriptApp.newTrigger("sendDailyPendingNotifications") // Name of function to run
+    ScriptApp.newTrigger("sendDailyPendingNotifications") // 実行する関数名
       .timeBased()
       .onWeekDay(day)
-      .atHour(9) // Set hour (0-23)
+      .atHour(9) // 発火時刻を指定（0～23）
       .inTimezone('Asia/Tokyo')
       .create();
   });
   // ScriptApp.newTrigger('sendDailyPendingNotifications')
   //   .timeBased()
   //   .everyDays(1)
-  //   .atHour(9)          // 9 AM in the project timezone
+  //   .atHour(9)          // 発火時刻（9 AM）
   //   .inTimezone('Asia/Tokyo')
   //   .create();
 
-  Logger.log('✅ Daily trigger installed: 9 AM JST weekdays');
-  return '✅ Trigger installed';
+  Logger.log('✅ 日次トリガーを登録しました: 平日毎日 9:00（JST）');
+  return '✅ トリガー登録完了';
 }
 
 // ── Remove the daily trigger ─────────────────────────────────
@@ -698,6 +698,6 @@ function removeDailyTrigger() {
       removed++;
     }
   });
-  Logger.log('Removed ' + removed + ' trigger(s)');
-  return 'Removed ' + removed + ' trigger(s)';
+  Logger.log('削除したトリガー数: ' + removed);
+  return 'トリガー ' + removed + ' 件を削除しました';
 }

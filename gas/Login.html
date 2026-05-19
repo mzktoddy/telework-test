@@ -109,10 +109,10 @@
     var passInput  = document.getElementById('password');
     var passHint   = document.getElementById('passwordHint');
 
-    // Active Google Workspace session email — fetched once on page load
+    // ページ読み込み時に一度取得した Google Workspace セッションのメールアドレス
     var gwsSessionEmail = '';
     
-    // Redirect page from server-side template (the originally requested page)
+    // サーバーサイドテンプレートから渡されるリダイレクト先ページ（当初リクエストしたページ）
     var redirectPage = '<?!= redirectPage ?>' || '';
 
     // ── Toggle password login section ─────────────────────────────

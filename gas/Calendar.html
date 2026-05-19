@@ -293,7 +293,7 @@ function _checkReady() {
   if (!_dataReady || !_deptsReady) return;
   document.getElementById('calLoading').classList.add('hidden');
   document.getElementById('calWrap').classList.remove('hidden');
-  // Hide dept filter only for employees (admins, managers, and reviewers can see it)
+  // 従業員のみ部署フィルターを非表示（管理者・マネージャー・照査者は表示）
   if (APP_USER && APP_USER.role === 'employee') {
     var dfWrap = document.getElementById('deptFilter');
     if (dfWrap) dfWrap.style.display = 'none';
@@ -311,7 +311,7 @@ function _onNavInput() {
   var y = parseInt(document.getElementById('navYear').value,  10);
   var m = parseInt(document.getElementById('navMonth').value, 10);
   if (isNaN(y) || isNaN(m)) return;
-  // Clamp month 1-12
+  // 月を 1～12 の範囲にクランプする
   if (m < 1)  { m = 1;  document.getElementById('navMonth').value = 1; }
   if (m > 12) { m = 12; document.getElementById('navMonth').value = 12; }
   if (y < 2000 || y > 2099) return;
@@ -343,11 +343,11 @@ function applyFilter() {
   if (!deptId) {
     _filtered = _allData.slice();
   } else {
-    // Filter considering employees can belong to multiple departments
+    // 従業員が複数部署に所属する場合も考慮してフィルタリングする
     _filtered = _allData.filter(function (r) {
       if (!r.department_id) return false;
       
-      // Parse department_id (could be JSON array or single ID)
+      // department_id フィールドをパースする（JSON 配列または単一 ID）
       var empDeptIds = [];
       try {
         if (r.department_id.startsWith('[')) {
@@ -359,7 +359,7 @@ function applyFilter() {
         empDeptIds = [r.department_id];
       }
       
-      // Check if selected department is in employee's departments
+      // 選択した部署が従業員の所属部署に含まれるか確認する
       return empDeptIds.indexOf(deptId) !== -1;
     });
   }
@@ -383,7 +383,7 @@ function renderCalendar() {
     String(today.getMonth() + 1).padStart(2, '0') + '-' +
     String(today.getDate()).padStart(2, '0');
 
-  // Offset: JS getDay() Sunday=0, Mon=1; we want Mon-first grid (Mon=0, Sun=6)
+  // オフセット: JSの getDay() は日曜日=0、月曜日=1；月曜日始まりのグリッドに変換（月=0、日=6）
   var jsFirstDay = new Date(_year, _month, 1).getDay();
   var offset     = (jsFirstDay === 0) ? 6 : jsFirstDay - 1;
   var daysInMonth = new Date(_year, _month + 1, 0).getDate();
@@ -429,7 +429,7 @@ function renderCalendar() {
       var contentHtml = '';
 
       if (entries.length > 0 && entries.length <= 5) {
-        // Show each employee pill — clicking the block opens popup for dept detail
+        // 従業員ごとのピルを表示—クリックで部署詳細のポップアップを開く
         contentHtml =
           '<div onclick="showDayPopup(\'' + _escJs(dateStr) + '\',event)" class="cursor-pointer space-y-0.5">' +
           entries.map(function (e) {
@@ -443,7 +443,7 @@ function renderCalendar() {
           '</div>';
 
       } else if (entries.length > 5) {
-        // Show count button only
+        // 件数ボタンのみ表示する
         contentHtml =
           '<button onclick="showDayPopup(\'' + _escJs(dateStr) + '\',event)" ' +
           'class="mt-0.5 w-full flex items-center gap-1.5 px-2 py-1.5 bg-slate-800 ' +
@@ -510,7 +510,7 @@ function showDayPopup(dateStr, event) {
     '</div>';
   }).join('');
 
-  // Smart position: favour right/below click, flip if off-screen
+  // スマートな位置調整: クリック地点の右・下を優先し、画面外にはみ出る場合は反転する
   var popup = document.getElementById('dayPopup');
   popup.classList.remove('hidden');
 

@@ -145,8 +145,15 @@
         </select>
       </div>
       <div>
-        <label class="text-xs font-medium text-slate-700 block mb-1">パスワード（Google Workspaceのみの場合は空白）</label>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input id="gwsAuthOnlyCheckbox" type="checkbox" class="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-2 focus:ring-blue-300" />
+          <span class="text-xs font-medium text-slate-700">Google Workspace認証のみ（パスワード不要）</span>
+        </label>
+      </div>
+      <div id="passwordFieldContainer">
+        <label class="text-xs font-medium text-slate-700 block mb-1">パスワード *</label>
         <input id="newPassword" type="password" class="w-full h-9 border border-slate-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+        <p id="passwordHelpText" class="text-xs text-slate-400 mt-0.5">編集時: 空白のまま保存すると既存パスワードを維持します</p>
       </div>
       <div id="modalError" class="hidden text-sm text-red-600 bg-red-50 p-2 rounded-md"></div>
     </div>
@@ -208,7 +215,6 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
 
   var nav = document.getElementById('sidebarNav');
   items.forEach(function (item) {
-    debugger;
     var a = document.createElement('a');
     a.href = SCRIPT_URL + '?page=' + item.page;
     a.className = [
@@ -232,7 +238,7 @@ var SCRIPT_URL = _gasEl.getAttribute('data-url') || '';
 // ── State ─────────────────────────────────────────────────────
 var allEmployees = [];
 var departments  = [];
-var editingEmployeeId = null; // Track if we're editing
+var editingEmployeeId = null; // 編集中の従業員 ID（新規追加時は null）
 
 // ── Load data ─────────────────────────────────────────────────
 google.script.run
@@ -263,7 +269,7 @@ function renderDepartmentCheckboxes() {
     return;
   }
   
-  // Build parent-child map
+  // 親子関係マップを構築する
   var parentMap = {};
   var rootDepts = [];
   
@@ -278,20 +284,20 @@ function renderDepartmentCheckboxes() {
     }
   });
   
-  // Helper function to get all child department IDs recursively
+  // 指定部署 ID 以下の全子部署 ID を再帰的に取得する
   function getAllChildDeptIds(deptId) {
     var childIds = [];
     var children = parentMap[deptId] || [];
     children.forEach(function(child) {
       childIds.push(child.id);
-      // Recursively get grandchildren
+      // 孙部署も再帰的に取得する
       var grandChildren = getAllChildDeptIds(child.id);
       childIds = childIds.concat(grandChildren);
     });
     return childIds;
   }
   
-  // Render departments hierarchically
+  // 階層構造で部署一覧をレンダリングする
   function renderDept(dept, level) {
     var label = document.createElement('label');
     label.className = 'flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer';
@@ -301,7 +307,7 @@ function renderDepartmentCheckboxes() {
     checkbox.type = 'checkbox';
     checkbox.value = dept.name;
     checkbox.className = 'dept-checkbox w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-2 focus:ring-blue-300';
-    // Store department ID for parent-child relationship tracking
+    // 親子関係の追跡のため部署 ID を保存する
     checkbox.setAttribute('data-dept-id', dept.id);
     
     // Add event listener to handle parent-child checking
@@ -312,7 +318,7 @@ function renderDepartmentCheckboxes() {
       // Get all child department IDs
       var childIds = getAllChildDeptIds(deptId);
       
-      // Check/uncheck all child checkboxes
+      // 子部署のチェックボックスを一括でオン・オフする
       childIds.forEach(function(childId) {
         var childCheckbox = container.querySelector('.dept-checkbox[data-dept-id="' + childId + '"]');
         if (childCheckbox) {
@@ -329,20 +335,20 @@ function renderDepartmentCheckboxes() {
     label.appendChild(span);
     container.appendChild(label);
     
-    // Render children
+    // 子部署をレンダリングする
     var children = parentMap[dept.id] || [];
     children.forEach(function(child) {
       renderDept(child, level + 1);
     });
   }
   
-  // Render all root departments and their children
+  // ルート部署および子部署をすべてレンダリングする
   rootDepts.forEach(function(dept) {
     renderDept(dept, 0);
   });
 }
 
-//var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; // Replace with your file ID
+//var logoFileId = '1aCQV8AlI7ssdAlLCHOOk-HNnZsK1Jr1D'; // 実際のファイル ID に置き換える
 // google.script.run
 //   .withSuccessHandler(function (base64Image) {
 //     if (base64Image) {
@@ -357,7 +363,7 @@ function renderDepartmentCheckboxes() {
 document.getElementById('searchInput').addEventListener('input', function () {
   var q = this.value.toLowerCase();
   var filtered = allEmployees.filter(function (e) {
-    // Search by name, email, or department names
+    // 氏名・メールアドレス・部署名で検索する
     var nameMatch = e.name.toLowerCase().includes(q);
     var emailMatch = e.email.toLowerCase().includes(q);
     var deptMatch = false;
@@ -449,16 +455,16 @@ function esc(s) {
 
 // ── Toggle status ─────────────────────────────────────────────
 function toggleStatus(userId, active) {
-  // Find employee name for confirmation message
-  var employee = allEmployees.find(function(e) { return e.id === userId; });
+  // 確認チェックの表示対象従業員名を検索する
+  var employee = allEmployees.find(function(e) { return String(e.id) === String(userId); });
   var empName = employee ? employee.name : 'この従業員';
   
-  // Show confirmation dialog
+  // 確認ダイアログを表示する
   var action = active ? '有効化' : '無効化';
   var message = empName + ' を' + action + 'しますか？';
   
   if (!confirm(message)) {
-    return; // User cancelled
+    return; // キャンセルされた場合
   }
   
   google.script.run
@@ -484,15 +490,19 @@ function openAddModal() {
   var mmField = document.getElementById('newMattermostUsername');
   mmField.value = '';
   mmField.removeAttribute('data-user-edited');
-  // Uncheck all department checkboxes
-  var checkboxes = document.querySelectorAll('.dept-checkbox');
-  checkboxes.forEach(function(cb) { cb.checked = false; });
+  // 新規追加および編集モーダルを開く際に全チェックボックスを解除する
+  var checkboxes2 = document.querySelectorAll('.dept-checkbox');
+  checkboxes2.forEach(function(cb) { cb.checked = false; });
   document.getElementById('newRole').value = 'employee';
+  // GWS Auth checkbox をリセットし、パスワードフィールドを表示
+  document.getElementById('gwsAuthOnlyCheckbox').checked = false;
+  document.getElementById('passwordFieldContainer').style.display = 'block';
+  document.getElementById('passwordHelpText').style.display = 'none';
 }
 
 function openEditModal(employeeId) {
   editingEmployeeId = employeeId;
-  var emp = allEmployees.find(function (e) { return e.id === employeeId; });
+  var emp = allEmployees.find(function (e) { return String(e.id) === String(employeeId); });
   if (!emp) return;
   
   document.getElementById('modalTitle').textContent = '従業員データ編集';
@@ -501,16 +511,35 @@ function openEditModal(employeeId) {
   document.getElementById('newEmail').value = emp.email || '';
   var mmField = document.getElementById('newMattermostUsername');
   mmField.value = emp.mattermost_username || '';
-  mmField.removeAttribute('data-user-edited'); // allow auto-update when email changes
-  
-  // Set department checkboxes
+  mmField.removeAttribute('data-user-edited'); // メール変更時に自動名更新を有効にする
+  // 部署チェックボックスをすべて解除する
   var checkboxes = document.querySelectorAll('.dept-checkbox');
   checkboxes.forEach(function(cb) {
     cb.checked = emp.departments && emp.departments.indexOf(cb.value) !== -1;
   });
   
   document.getElementById('newRole').value = emp.role || 'employee';
-  document.getElementById('newPassword').value = '';
+  
+  // GWS Auth checkbox とパスワードフィールドの状態を設定
+  var gwsCheckbox = document.getElementById('gwsAuthOnlyCheckbox');
+  var passwordField = document.getElementById('newPassword');
+  var passwordContainer = document.getElementById('passwordFieldContainer');
+  var passwordHelpText = document.getElementById('passwordHelpText');
+  
+  if (emp.has_password) {
+    // パスワードあり: チェックボックスOFF、パスワードフィールド表示
+    gwsCheckbox.checked = false;
+    passwordContainer.style.display = 'block';
+    passwordField.value = '••••••••';
+    passwordField.setAttribute('placeholder', '変更する場合は新しいパスワードを入力');
+    passwordHelpText.style.display = 'block';
+  } else {
+    // GWS Auth のみ: チェックボックスON、パスワードフィールド非表示
+    gwsCheckbox.checked = true;
+    passwordContainer.style.display = 'none';
+    passwordField.value = '';
+    passwordField.setAttribute('placeholder', '');
+  }
   
   document.getElementById('addModal').classList.remove('hidden');
   document.getElementById('modalError').classList.add('hidden');
@@ -538,8 +567,19 @@ function saveEmployee() {
   });
   
   var role  = document.getElementById('newRole').value;
-  var pass  = document.getElementById('newPassword').value;
   var mattermostUsername = document.getElementById('newMattermostUsername').value.trim();
+  
+  // GWS Auth Only チェックボックスの状態を確認
+  var isGwsAuthOnly = document.getElementById('gwsAuthOnlyCheckbox').checked;
+  var pass = '';
+  
+  if (!isGwsAuthOnly) {
+    pass = document.getElementById('newPassword').value;
+    // If password field contains only dots (••••••••), treat it as unchanged (empty)
+    if (pass === '••••••••') {
+      pass = '';
+    }
+  }
 
   if (!name || !email || !role) {
     showModalError('氏名・メールアドレス・ロールは必須です');
@@ -552,7 +592,7 @@ function saveEmployee() {
   btn.textContent = isEdit ? '更新中...' : '追加中...';
 
   if (isEdit) {
-    // Update existing employee
+    // 既存従業員を更新する
     google.script.run
       .withSuccessHandler(function (r) {
         btn.disabled = false; btn.textContent = '更新する';
@@ -565,9 +605,18 @@ function saveEmployee() {
         btn.disabled = false; btn.textContent = '更新する';
         showModalError('エラーが発生しました');
       })
-      .updateEmployee({ id: editingEmployeeId, name: name, email: email, departments: selectedDepts, role: role, password: pass, mattermostUsername: mattermostUsername });
+      .updateEmployee({ 
+        id: editingEmployeeId, 
+        name: name, 
+        email: email, 
+        departments: selectedDepts, 
+        role: role, 
+        password: pass, 
+        mattermostUsername: mattermostUsername,
+        isGwsAuthOnly: isGwsAuthOnly
+      });
   } else {
-    // Add new employee
+    // 新規従業員を追加する
     google.script.run
       .withSuccessHandler(function (r) {
         btn.disabled = false; btn.textContent = '追加する';
@@ -621,6 +670,36 @@ document.getElementById('newEmail').addEventListener('input', function () {
 
 document.getElementById('newMattermostUsername').addEventListener('input', function () {
   this.setAttribute('data-user-edited', 'true');
+});
+
+// ── Toggle password field based on GWS Auth Only checkbox ────
+document.getElementById('gwsAuthOnlyCheckbox').addEventListener('change', function () {
+  var passwordContainer = document.getElementById('passwordFieldContainer');
+  var passwordField = document.getElementById('newPassword');
+  var passwordHelpText = document.getElementById('passwordHelpText');
+  
+  if (this.checked) {
+    // GWS Auth のみ: パスワードフィールドを非表示
+    passwordContainer.style.display = 'none';
+    passwordField.value = '';
+  } else {
+    // パスワード認証あり: パスワードフィールドを表示
+    passwordContainer.style.display = 'block';
+    // 編集モードの場合はヘルプテキストを表示
+    if (editingEmployeeId !== null) {
+      passwordHelpText.style.display = 'block';
+    } else {
+      passwordHelpText.style.display = 'none';
+    }
+  }
+});
+
+// ── Clear password dots when user starts typing ──────────────
+document.getElementById('newPassword').addEventListener('focus', function () {
+  if (this.value === '••••••••') {
+    this.value = '';
+    this.setAttribute('placeholder', '新しいパスワードを入力');
+  }
 });
 
 // ── Logout ────────────────────────────────────────────────────

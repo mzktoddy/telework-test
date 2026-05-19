@@ -1,39 +1,40 @@
 // ============================================================
-//  Auth.gs — Google Workspace authentication + password fallback
+//  Auth.gs — Google Workspace 認証・パスワードフォールバック
 //
-//  PASSWORD ACCEPTANCE RULES (loginUser):
-//  1. If the browser's active Google Workspace session email matches
-//     the typed email  →  no password needed (GWS identity = proof).
-//  2. If the user has a password_hash in the users sheet
-//     →  type the plain-text password; it is SHA-256 hashed and compared.
-//  3. If password_hash = 'GWS_AUTH_ONLY' and no GWS session match
-//     →  user must click the "Google Workspaceでサインイン" button.
+//  パスワード認証ルール（loginUser）：
+//  1. ブラウザのアクティブな Google Workspace セッションのメールアドレスが
+//     入力されたメールアドレスと一致する場合 → パスワード不要
+//     （Google Workspace の身元情報を証明として使用）
+//  2. usersシートに password_hash が設定されている場合
+//     → 平文パスワードを入力すると SHA-256 ハッシュと照合する
+//  3. password_hash = 'GWS_AUTH_ONLY' かつ GWS セッションが一致しない場合
+//     → 「Google Workspace でサインイン」ボタンを使用する必要がある
 //
-//  SETUP: Run hashPassword('yourplaintext') from the editor console
-//         to get the hash to store in the users sheet.
+//  初期設定: エディタのコンソールから hashPassword('パスワード') を実行し
+//            取得したハッシュを users シートに保存してください
 // ============================================================
-// ── Returns the email of the active Google Workspace session ─
-//    Used by Login.html to auto-detect whether to show the password field.
+// ── アクティブな Google Workspace セッションのメールアドレスを返す ─
+//    ログイン画面でパスワード入力欄の表示・非表示を切り替える際に使用する
 function getGwsSessionEmail() {
   try { return Session.getActiveUser().getEmail() || ''; } catch (e) { return ''; }
 }
-// ── Called by doGet() and any server function that needs the identity ─
-//    Reads only from the 30-min user cache written by loginUser() /
-//    loginWithGoogle(). Does NOT call Session.getActiveUser(), so the
-//    cache must already exist (set at login time).
-var SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-var CACHE_TTL_S    = 21600;               // 6 hours — CacheService hard limit
+// ── doGet() およびユーザー情報が必要なサーバー関数から呼び出す ─
+//    loginUser() / loginWithGoogle() がログイン時に書き込んだ
+//    キャッシュのみを参照する。Session.getActiveUser() は呼び出さないため、
+//    キャッシュが存在しない場合は null を返す（未認証扱い）
+var SESSION_TTL_MS = 24 * 60 * 60 * 1000; // セッション有効期限（24時間・ミリ秒）
+var CACHE_TTL_S    = 21600;               // キャッシュ有効期限（6時間・秒）CacheService の上限
 
 function getCurrentUser() {
   var cache = CacheService.getUserCache();
 
-  // Fast path: still in cache
+  // 高速パス: キャッシュが有効な場合はそのまま返す
   var cached = cache.get('gasUser');
   if (cached) {
     try { return JSON.parse(cached); } catch (e) {}
   }
 
-  // Slow path: cache expired — check UserProperties (survives cache eviction)
+  // 低速パス: キャッシュ期限切れ → UserProperties を確認する（キャッシュが破棄されても残存）
   var props = PropertiesService.getUserProperties();
   var stored = props.getProperty('gasUser');
   if (!stored) return null;
@@ -41,21 +42,21 @@ function getCurrentUser() {
   var session;
   try { session = JSON.parse(stored); } catch (e) { props.deleteProperty('gasUser'); return null; }
 
-  // Validate 24-hour window
+  // 24時間の有効期限を確認する
   if (!session.loginTime || (Date.now() - session.loginTime) > SESSION_TTL_MS) {
     props.deleteProperty('gasUser');
     return null;
   }
 
-  // Repopulate cache so next call is fast again
+  // 次回の呼び出しを高速化するためキャッシュを再投入する
   var user = { id: session.id, email: session.email, name: session.name,
                role: session.role, department_id: session.department_id };
   try { cache.put('gasUser', JSON.stringify(user), CACHE_TTL_S); } catch (e) {}
   return user;
 }
 
-// ── Called from Google Workspace button in Login.html ────────
-//  Uses the active Google session — no password required.
+// ── Login.html の「Google Workspace でサインイン」ボタンから呼び出す ─
+//    アクティブな Google セッションを使用するためパスワード不要
 function loginWithGoogle(redirectPage) {
   try {
     var sessionEmail = '';
@@ -85,10 +86,10 @@ function loginWithGoogle(redirectPage) {
   }
 }
 
-// ── Called from email+password form in Login.html ─────────────
-//  If the GWS session email matches the typed email, password is
-//  not required (GWS identity is used as proof). Otherwise the
-//  SHA-256 password hash is checked.
+// ── Login.html のメールアドレス＋パスワード入力フォームから呼び出す ─
+//    入力メールアドレスが GWS セッションのメールアドレスと一致する場合は
+//    パスワード不要（Google Workspace の身元情報を証明として使用）
+//    一致しない場合は SHA-256 ハッシュによるパスワード照合を行う
 function loginUser(email, password, redirectPage) {
   try {
     if (!email) return { error: 'メールアドレスを入力してください。' };
@@ -97,18 +98,18 @@ function loginUser(email, password, redirectPage) {
     if (!user)           return { error: 'このメールアドレスは登録されていません。' };
     if (!user.is_active) return { error: 'アカウントが無効です。管理者にお問い合わせください。' };
 
-    // Check if an active Google Workspace session matches the typed email
+    // Google Workspace セッションのメールアドレスと入力内容を照合する
     var sessionEmail = '';
     try { sessionEmail = Session.getActiveUser().getEmail(); } catch (e) {}
     var gwsMatch = sessionEmail &&
       sessionEmail.toLowerCase() === email.toLowerCase();
 
     if (gwsMatch) {
-      // GWS identity confirmed — no password needed
+      // GWS の身元情報で確認済み — パスワード不要
       return _buildSession(user, redirectPage);
     }
 
-    // No GWS match — require password
+    // GWS セッションが一致しない場合 — パスワード認証へ進む
     if (user.password_hash === 'GWS_AUTH_ONLY') {
       return {
         error: 'このアカウントはGoogle Workspace認証が必要です。' +
@@ -128,9 +129,9 @@ function loginUser(email, password, redirectPage) {
   }
 }
 
-// ── Shared: write cache and build redirect response ─────────────
-//  Redirects to the originally requested page, or dashboard if none specified.
-//  The cache is required for getCurrentUser() to confirm authentication.
+// ── loginUser / loginWithGoogle 共通: セッション書き込みとリダイレクト応答を返す ─
+//    認証後は要求されたページ（なければダッシュボード）へリダイレクトする
+//    getCurrentUser() が認証済みかどうかを確認するためにキャッシュが必要
 function _buildSession(user, redirectPage) {
   var info = {
     id:            user.id,
@@ -139,16 +140,16 @@ function _buildSession(user, redirectPage) {
     role:          user.role,
     department_id: user.department_id,
   };
-  // Persist for up to 24 hours using UserProperties (survives cache eviction)
+  // UserProperties に最大24時間保持する（キャッシュが破棄されても残存）
   var sessionInfo = { id: info.id, email: info.email, name: info.name,
                       role: info.role, department_id: info.department_id,
                       loginTime: Date.now() };
   PropertiesService.getUserProperties().setProperty('gasUser', JSON.stringify(sessionInfo));
 
-  // Also populate fast-path cache (max 6 h)
+  // 高速パス用キャッシュにも保存する（最大6時間）
   try { CacheService.getUserCache().put('gasUser', JSON.stringify(info), CACHE_TTL_S); } catch (e) {}
 
-  // Redirect to originally requested page, or dashboard as default
+  // 要求されたページ、なければダッシュボードへリダイレクトする
   var page = redirectPage || 'dashboard';
   return {
     success:     true,
@@ -156,14 +157,14 @@ function _buildSession(user, redirectPage) {
   };
 }
 
-// ── Called from Sidebar logout button ────────────────────────
+// ── サイドバーのログアウトボタンから呼び出す ────────────────
 function logoutUser() {
   CacheService.getUserCache().remove('gasUser');
   PropertiesService.getUserProperties().deleteProperty('gasUser');
   return { redirectUrl: ScriptApp.getService().getUrl() + '?page=login' };
 }
 
-// ── Password helpers ─────────────────────────────────────────
+// ── パスワードユーティリティ ─────────────────────────────────
 function checkPassword(plain, hash) {
   if (!hash || hash === 'GWS_AUTH_ONLY') return false;
   return computeSha256(plain) === hash;
@@ -178,5 +179,5 @@ function computeSha256(input) {
   }).join('');
 }
 
-// Utility: hash a plain password before storing (run once from GAS console)
+// 平文パスワードを保存する前にハッシュ化する（GAS エディタのコンソールから一度だけ実行）
 function hashPassword(plain) { return computeSha256(plain); }

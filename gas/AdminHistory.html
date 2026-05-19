@@ -286,7 +286,7 @@ var _taskData     = [];
 var _filteredRows = [];
 var _exportLink   = null;
 
-// Pagination state
+// ページネーションの状態変数
 var _telePagination = { page: 1, pageSize: 20, totalPages: 1, totalItems: 0 };
 var _taskPagination = { page: 1, pageSize: 20, totalPages: 1, totalItems: 0 };
 var _isLoading = false;
@@ -401,7 +401,7 @@ function loadDataFromServer(page, rebuildWeekOptions) {
   if (_isLoading) return;
   _isLoading = true;
   
-  // Default: rebuild week options only on page 1 (new search)
+  // デフォルト: 新規検索（ページ 1）のときのみ週フィルターを再構築する
   if (rebuildWeekOptions === undefined) {
     rebuildWeekOptions = (page === 1);
   }
@@ -469,8 +469,8 @@ function loadDataFromServer(page, rebuildWeekOptions) {
     [fn](options);
 }
 
-// Initial load
-fetchAndBuildWeekOptions(); // Load week options first
+// 初回ロード
+fetchAndBuildWeekOptions(); // データロード前に先に週オプションを組み立てる
 loadDataFromServer(1);
 
 // ── Tab switching ─────────────────────────────────────────────
@@ -484,13 +484,13 @@ function switchTab(tab) {
   document.getElementById('weekFilter').value = '';
   clearExportLink();
   
-  // Show loading state in week filter
+  // 週フィルターのロード中表示を設定する
   var weekFilterEl = document.getElementById('weekFilter');
   weekFilterEl.disabled = true;
   weekFilterEl.innerHTML = '<option value="">読み込み中...</option>';
   
   fetchAndBuildWeekOptions();
-  loadDataFromServer(1, false); // Don't rebuild (we just did it above)
+  loadDataFromServer(1, false); // 週オプションは再構築しない（先ほど実施済み）
 }
 
 // ── Debounced search for employee name ────────────────────────
@@ -503,24 +503,24 @@ function debounceSearch() {
 
 // ── Quick date range change (only rebuild week options) ───────────────
 function onDateRangeChangeQuick() {
-  // Reset week filter when date range changes
+  // 日付範囲変更時に週フィルターをリセットする
   document.getElementById('weekFilter').value = '';
-  // Show loading state in week filter
+  // 週フィルターのロード中表示を設定する
   var weekFilterEl = document.getElementById('weekFilter');
   weekFilterEl.disabled = true;
   weekFilterEl.innerHTML = '<option value="">読み込み中...</option>';
-  // Only fetch available weeks, don't reload data yet
+  // 利用可能な週のみ取得し、データは再読み込みしない
   fetchAndBuildWeekOptions();
 }
 
 // ── Handle date range change (legacy - kept for compatibility) ────────────
 function onDateRangeChange() {
-  // Reset week filter when date range changes
+  // 日付範囲変更時に週フィルターをリセットする
   document.getElementById('weekFilter').value = '';
-  // Fetch available weeks for the new date range
+  // 新しい日付範囲で利用可能な週を取得する
   fetchAndBuildWeekOptions();
-  // Reload data
-  loadDataFromServer(1, false); // Don't rebuild week options (we just did it above)
+  // データを再読み込みする
+  loadDataFromServer(1, false); // 週オプションは再構築しない（先ほど実施済み）
 }
 
 // ── Fetch available weeks and build dropdown ───────────────────────
@@ -571,59 +571,67 @@ function buildWeekOptionsFromWeeks(weeks) {
 function renderPagination() {
   var pagination = _activeTab === 'telework' ? _telePagination : _taskPagination;
   var controlsEl = document.getElementById('paginationControls');
-  
-  // Pagination controls
+
+  // ローディング中のスタイルをリセット
+  controlsEl.style.opacity = '';
+  controlsEl.style.pointerEvents = '';
+
   if (pagination.totalPages <= 1) {
     controlsEl.innerHTML = '';
     return;
   }
-  
+
   var html = '';
-  
-  // Previous button
+  var prevDisabled = pagination.page <= 1;
+  var nextDisabled = pagination.page >= pagination.totalPages;
+
+  // 前へボタン
   html += '<button onclick="goToPage(' + (pagination.page - 1) + ')" ' +
-    (pagination.page <= 1 ? 'disabled ' : '') +
+    (prevDisabled ? 'disabled ' : '') +
     'class="h-9 px-3 border border-slate-300 rounded-lg text-sm text-slate-700 ' +
-    (pagination.page <= 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50') + ' transition-colors">' +
+    (prevDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100 active:bg-slate-200 cursor-pointer') +
+    ' transition-colors">' +
     '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
     '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>' +
     '</svg></button>';
-  
-  // Page numbers
+
+  // ページ番号
   var startPage = Math.max(1, pagination.page - 2);
-  var endPage = Math.min(pagination.totalPages, pagination.page + 2);
-  
+  var endPage   = Math.min(pagination.totalPages, pagination.page + 2);
+
   if (startPage > 1) {
-    html += '<button onclick="goToPage(1)" class="h-9 w-9 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors">1</button>';
-    if (startPage > 2) {
-      html += '<span class="text-slate-400">...</span>';
-    }
+    html += '<button onclick="goToPage(1)" class="h-9 w-9 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-100 active:bg-slate-200 transition-colors cursor-pointer">1</button>';
+    if (startPage > 2) html += '<span class="text-slate-400 px-1">…</span>';
   }
-  
+
   for (var p = startPage; p <= endPage; p++) {
     if (p === pagination.page) {
-      html += '<button class="h-9 w-9 bg-blue-600 text-white rounded-lg text-sm font-medium">' + p + '</button>';
+      // 現在ページ: 強調表示（クリック不可）
+      html += '<button disabled class="h-9 w-9 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm cursor-default">' + p + '</button>';
     } else {
-      html += '<button onclick="goToPage(' + p + ')" class="h-9 w-9 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors">' + p + '</button>';
+      html += '<button onclick="goToPage(' + p + ')" ' +
+        'class="h-9 w-9 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 active:bg-blue-100 transition-colors cursor-pointer">' +
+        p + '</button>';
     }
   }
-  
+
   if (endPage < pagination.totalPages) {
-    if (endPage < pagination.totalPages - 1) {
-      html += '<span class="text-slate-400">...</span>';
-    }
-    html += '<button onclick="goToPage(' + pagination.totalPages + ')" class="h-9 w-9 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors">' + pagination.totalPages + '</button>';
+    if (endPage < pagination.totalPages - 1) html += '<span class="text-slate-400 px-1">…</span>';
+    html += '<button onclick="goToPage(' + pagination.totalPages + ')" ' +
+      'class="h-9 w-9 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 active:bg-blue-100 transition-colors cursor-pointer">' +
+      pagination.totalPages + '</button>';
   }
-  
-  // Next button
+
+  // 次へボタン
   html += '<button onclick="goToPage(' + (pagination.page + 1) + ')" ' +
-    (pagination.page >= pagination.totalPages ? 'disabled ' : '') +
+    (nextDisabled ? 'disabled ' : '') +
     'class="h-9 px-3 border border-slate-300 rounded-lg text-sm text-slate-700 ' +
-    (pagination.page >= pagination.totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50') + ' transition-colors">' +
+    (nextDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100 active:bg-slate-200 cursor-pointer') +
+    ' transition-colors">' +
     '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
     '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>' +
     '</svg></button>';
-  
+
   controlsEl.innerHTML = html;
 }
 
@@ -643,7 +651,25 @@ function updatePaginationSummary() {
 function goToPage(page) {
   var pagination = _activeTab === 'telework' ? _telePagination : _taskPagination;
   if (page < 1 || page > pagination.totalPages) return;
-  // Don't rebuild week options when paginating
+  if (_isLoading) return;
+
+  // クリック直後に即時フィードバック: コントロールを無効化しローディング状態を表示
+  var controlsEl = document.getElementById('paginationControls');
+  controlsEl.style.opacity = '0.45';
+  controlsEl.style.pointerEvents = 'none';
+
+  // クリックされたページ番号ボタンをパルスアニメーションで強調
+  var buttons = controlsEl.querySelectorAll('button');
+  buttons.forEach(function(btn) {
+    if (btn.textContent.trim() === String(page)) {
+      btn.className = 'h-9 w-9 bg-blue-400 text-white rounded-lg text-sm font-semibold animate-pulse';
+    }
+  });
+
+  // テーブル上部にスクロール
+  var tableEl = document.getElementById('paginationInfo');
+  if (tableEl) tableEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
   loadDataFromServer(page, false);
 }
 
@@ -688,7 +714,7 @@ function buildWeekOptionsFromData(data) {
 
 // ── Clear filters ─────────────────────────────────────────────
 function clearFilters() {
-  // Reset date range to last 1 month
+  // 日付範囲を直近 1ヶ月にリセットする
   var today = new Date();
   var oneMonthAgo = new Date();
   oneMonthAgo.setMonth(today.getMonth() - 1);
@@ -699,7 +725,7 @@ function clearFilters() {
   document.getElementById('searchName').value = '';
   document.getElementById('weekFilter').value = '';
   
-  // Show loading state in week filter
+  // 週フィルターのロード中表示を設定する
   var weekFilterEl = document.getElementById('weekFilter');
   weekFilterEl.disabled = true;
   weekFilterEl.innerHTML = '<option value="">読み込み中...</option>';
@@ -787,7 +813,7 @@ function deleteOne(id, type) {
   google.script.run
     .withSuccessHandler(function (ok) {
       if (ok) {
-        // Remove from local data and re-render
+        // ローカルデータから削除して再レンダリングする
         if (type === 'telework') {
           _teleData = _teleData.filter(function (r) { return r.id !== id; });
           _telePagination.totalItems = Math.max(0, _telePagination.totalItems - 1);
@@ -795,7 +821,7 @@ function deleteOne(id, type) {
           _taskData = _taskData.filter(function (r) { return r.id !== id; });
           _taskPagination.totalItems = Math.max(0, _taskPagination.totalItems - 1);
         }
-        // Reload to refresh counts
+        // 件数を更新するため全データを再読み込みする
         loadDataFromServer(_activeTab === 'telework' ? _telePagination.page : _taskPagination.page, false);
         showToast('削除しました');
       } else {
@@ -820,40 +846,41 @@ function bulkDelete() {
 
   var ids  = _filteredRows.map(function (r) { return r.id; });
   var type = _activeTab;
-  var fn   = type === 'telework' ? 'adminDeleteTeleworkReport' : 'adminDeleteTaskReport';
+  var fn   = type === 'telework' ? 'adminBulkDeleteTeleworkReports' : 'adminBulkDeleteTaskReports';
   document.getElementById('pageLoader').classList.remove('hidden');
 
-  var pending = ids.length;
-  var failed  = 0;
-  ids.forEach(function (id) {
-    google.script.run
-      .withSuccessHandler(function () {
-        pending--;
-        if (pending === 0) _afterBulkDelete(ids, type, failed);
-      })
-      .withFailureHandler(function () {
-        pending--;
-        failed++;
-        if (pending === 0) _afterBulkDelete(ids, type, failed);
-      })
-      [fn](id);
-  });
-}
-
-function _afterBulkDelete(ids, type, failed) {
-  document.getElementById('pageLoader').classList.add('hidden');
-  var done = ids.length - failed;
-  showToast(failed > 0 ? done + '件削除しました（' + failed + '件失敗）' : done + '件削除しました', failed > 0);
-  // Reload data from server to get accurate count
-  loadDataFromServer(1);
+  // 一括削除を単一のサーバー呼び出しで実行
+  google.script.run
+    .withSuccessHandler(function (result) {
+      document.getElementById('pageLoader').classList.add('hidden');
+      if (result && result.error) {
+        showToast('エラーが発生しました: ' + result.error, true);
+        return;
+      }
+      var deleted = result.deleted || 0;
+      var failed = result.failed || 0;
+      showToast(
+        failed > 0 
+          ? deleted + '件削除しました（' + failed + '件失敗）' 
+          : deleted + '件削除しました', 
+        failed > 0
+      );
+      // サーバーから正確な件数を取得するため再読み込みする
+      loadDataFromServer(1);
+    })
+    .withFailureHandler(function (error) {
+      document.getElementById('pageLoader').classList.add('hidden');
+      showToast('削除中にエラーが発生しました', true);
+    })
+    [fn](ids);
 }
 
 // ── Export to spreadsheet ─────────────────────────────────────
 function exportToSheet() {
-  // Show loading state
+  // ロード中表示を開始する
   document.getElementById('pageLoader').classList.remove('hidden');
   
-  // Build filter options - server will handle everything
+  // フィルターオプションを構築する（実際の処理はサーバー側で実施）
   var options = {
     startDate: document.getElementById('filterStartDate').value || null,
     endDate: document.getElementById('filterEndDate').value || null,
@@ -863,7 +890,7 @@ function exportToSheet() {
     reportType: _activeTab
   };
   
-  // Single optimized server call - does all filtering, transformation, and export server-side
+  // フィルタリング・変換・エクスポートをサーバー側で一括実施する最適化されたサーバー呼び出し
   google.script.run
     .withSuccessHandler(function (res) {
       document.getElementById('pageLoader').classList.add('hidden');
@@ -916,7 +943,7 @@ function openDetail(id, type) {
   if (type === 'task') {
     document.getElementById('modalTitle').textContent = '日報報告 詳細';
 
-    // Format readable date title
+    // 読みやすい日付タイトルにフォーマットする
     var dayNamesJa = ['日', '月', '火', '水', '木', '金', '土'];
     var dateObj = d.report_date ? new Date(d.report_date) : null;
     var dateTitle = (dateObj && !isNaN(dateObj.getTime()))
@@ -926,7 +953,7 @@ function openDetail(id, type) {
       ? escHtml(String(d.created_at).replace('T', ' ').substring(0, 16))
       : '‐';
 
-    // Redmine task cards
+    // Redmine タスクカード
     var redmineCardsHtml = '';
     if (tasks.length > 0) {
       redmineCardsHtml = tasks.map(function (t) {
@@ -1010,7 +1037,7 @@ function openDetail(id, type) {
             '</p>' +
           '</div>' +
         '</div>' +
-        // Right: Redmine tasks
+        // 右列: Redmine タスク
         '<div class="col-span-3">' +
           '<div class="bg-slate-50 rounded-xl border border-slate-200 p-4 h-full">' +
             '<div class="flex items-center gap-2 mb-3 pb-2 border-b border-slate-200">' +
@@ -1058,7 +1085,7 @@ function openDetail(id, type) {
       : '<p class="text-xs text-slate-400 py-2 text-center">Redmineタスクなし</p>';
 
     document.getElementById('modalBody').innerHTML =
-      // Header
+      // ヘッダー部
       '<div class="rounded-xl border border-slate-200 bg-white p-5 mb-5">' +
         '<div class="flex items-center justify-between mb-3">' +
           '<div class="flex items-center gap-2">' +
@@ -1085,7 +1112,7 @@ function openDetail(id, type) {
         '</div>' +
         '<p class="text-xs text-slate-500">従業員: <span class="font-semibold text-slate-700">' + escHtml(d.employee_name) + '</span></p>' +
       '</div>' +
-      // Content + Redmine two-column
+      // 内容 + Redmine の2カラムレイアウト
       '<div class="grid grid-cols-5 gap-4">' +
         '<div class="col-span-3">' +
           '<p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">業務内容・メモ</p>' +
