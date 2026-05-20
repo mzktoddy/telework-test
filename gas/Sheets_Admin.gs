@@ -307,7 +307,10 @@ function getAvailableWeeksForDateRange(options) {
   // 新しい週順（降順）にソート
   weeks.sort(function(a, b) { return b.timestamp - a.timestamp; });
 
-  try { cache.put(cacheKey, JSON.stringify(weeks), 300); } catch (e) {}
+  try { 
+    var ttl = _getSecondsUntilMidnight();
+    cache.put(cacheKey, JSON.stringify(weeks), ttl); 
+  } catch (e) {}
   return weeks;
 }
 
@@ -480,15 +483,17 @@ function adminExportFiltered(options) {
   });
   sheet.getRange(2, 1, dataRows.length, headers.length).setValues(dataRows);
 
-  // 指定フォルダに移動する（未指定の場合はマイドライブ直下）
+  // 指定フォルダに移動する（未指定の場合はデフォルトのエクスポートフォルダまたはマイドライブ直下）
   var file = DriveApp.getFileById(newSS.getId());
-  if (options.folderId) {
+  var targetFolderId = options.folderId || EXPORT_FOLDER_ID;
+  if (targetFolderId) {
     try {
-      var folder = DriveApp.getFolderById(options.folderId);
+      var folder = DriveApp.getFolderById(targetFolderId);
       folder.addFile(file);
       DriveApp.getRootFolder().removeFile(file);
+      Logger.log('エクスポートファイルをフォルダに移動しました: ' + folder.getName());
     } catch (e) {
-      Logger.log('フォルダ移動エラー: ' + e.toString());
+      Logger.log('フォルダ移動エラー: ' + e.toString() + ' (フォルダID: ' + targetFolderId + ')');
     }
   }
 
@@ -547,8 +552,21 @@ function adminExportToNewSpreadsheet(dataType, dateFrom, dateTo) {
     return headers.map(function(h) { return r[h] !== undefined ? r[h] : ''; });
   });
   sheet.getRange(2, 1, dataRows.length, headers.length).setValues(dataRows);
-  SpreadsheetApp.flush();
 
+  // デフォルトのエクスポートフォルダに移動する
+  var file = DriveApp.getFileById(newSS.getId());
+  if (EXPORT_FOLDER_ID) {
+    try {
+      var folder = DriveApp.getFolderById(EXPORT_FOLDER_ID);
+      folder.addFile(file);
+      DriveApp.getRootFolder().removeFile(file);
+      Logger.log('エクスポートファイルをフォルダに移動しました: ' + folder.getName());
+    } catch (e) {
+      Logger.log('フォルダ移動エラー: ' + e.toString() + ' (フォルダID: ' + EXPORT_FOLDER_ID + ')');
+    }
+  }
+
+  SpreadsheetApp.flush();
   return { success: true, url: newSS.getUrl(), name: ssName };
 }
 

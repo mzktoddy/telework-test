@@ -78,7 +78,7 @@ function createUser(name, email, role, departmentIds, plainPassword, mattermostU
   }
 
   var u = {
-    id:                  _uuid(),
+    id:                  _generateUserId(),
     email:               email,
     password_hash:       plainPassword ? hashPassword(plainPassword) : 'GWS_AUTH_ONLY',
     name:                name,

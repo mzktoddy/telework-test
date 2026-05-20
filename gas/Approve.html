@@ -352,6 +352,14 @@ function getApprovalButton(report) {
   var status = report.status;
   var userRole = APP_USER.role;
   
+  // 在宅勤務申請（週単位）の場合、tasksの状態を確認する
+  var hasSubmittedTask = false;
+  var hasReviewedTask = false;
+  if (Array.isArray(report.tasks)) {
+    hasSubmittedTask = report.tasks.some(function(t) { return t.status === 'submitted'; });
+    hasReviewedTask = report.tasks.some(function(t) { return t.status === 'reviewed'; });
+  }
+  
   // ステータスが submitted（提出済み）の場合: 「照査」ボタンを表示する
   if (status === 'submitted') {
     return '<button id="actionApproveBtn" onclick="doReview(\'' + report.id + '\')" ' +
@@ -360,17 +368,35 @@ function getApprovalButton(report) {
     '</button>';
   }
   
-  // ステータスが reviewed（照査済み）の場合: マネージャー・管理者のみ承認可能
+  // ステータスが reviewed（照査済み）の場合
   if (status === 'reviewed') {
+    // 照査者の場合: 週内に submitted タスクがあれば照査ボタンを表示
+    if (userRole === 'reviewer') {
+      if (hasSubmittedTask) {
+        return '<button id="actionApproveBtn" onclick="doReview(\'' + report.id + '\')" ' +
+          'class="flex-1 h-10 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-sm font-medium transition-colors">' +
+          '照査 ✓' +
+        '</button>';
+      } else {
+        // submitted タスクがない場合は承認待ち
+        return '<button disabled class="flex-1 h-10 bg-slate-300 text-slate-500 rounded-full text-sm font-medium cursor-not-allowed">' +
+          '承認待ち' +
+        '</button>';
+      }
+    }
+    // マネージャー・管理者の場合
     if (userRole === 'manager' || userRole === 'admin') {
+      // 週内に submitted タスクがある場合は照査ボタンを優先表示
+      if (hasSubmittedTask) {
+        return '<button id="actionApproveBtn" onclick="doReview(\'' + report.id + '\')" ' +
+          'class="flex-1 h-10 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-sm font-medium transition-colors">' +
+          '照査 ✓' +
+        '</button>';
+      }
+      // submitted タスクがなく reviewed タスクのみの場合は承認ボタン
       return '<button id="actionApproveBtn" onclick="doApprove(\'' + report.id + '\')" ' +
         'class="flex-1 h-10 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-sm font-medium transition-colors">' +
         '承認 ✓' +
-      '</button>';
-    } else {
-      // 照査者は承認できない（照査のみ可能）
-      return '<button disabled class="flex-1 h-10 bg-slate-300 text-slate-500 rounded-full text-sm font-medium cursor-not-allowed">' +
-        '承認待ち' +
       '</button>';
     }
   }
@@ -696,7 +722,18 @@ function doReview(reportId) {
       showActionMsg('申請日が見つかりません', false);
       return;
     }
-    var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
+    // 照査者の場合、submitted状態のタスクのみを照査対象とする
+    var dayIds = selectedReport.tasks
+      .filter(function(t) { return t.status === 'submitted'; })
+      .map(function(t) { return t.id; });
+    
+    if (dayIds.length === 0) {
+      isProcessing = false;
+      if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
+      showActionMsg('照査可能な申請がありません', false);
+      return;
+    }
+    
     google.script.run
       .withSuccessHandler(function (r) {
         isProcessing = false;
@@ -749,7 +786,18 @@ function doApprove(reportId) {
       showActionMsg('申請日が見つかりません', false);
       return;
     }
-    var dayIds = selectedReport.tasks.map(function(t) { return t.id; });
+    // 承認者の場合、reviewed状態のタスクのみを承認対象とする
+    var dayIds = selectedReport.tasks
+      .filter(function(t) { return t.status === 'reviewed'; })
+      .map(function(t) { return t.id; });
+    
+    if (dayIds.length === 0) {
+      isProcessing = false;
+      if (approveBtn && approveBtnOrig) { approveBtn.disabled = false; approveBtn.innerHTML = approveBtnOrig; }
+      showActionMsg('承認可能な申請がありません', false);
+      return;
+    }
+    
     google.script.run
       .withSuccessHandler(function (r) {
         isProcessing = false;

@@ -72,7 +72,7 @@ function _seedData(ss) {
 
   // ⚠ 実際の管理者メールアドレスに変更してください
   _appendRow(SHEET_USERS, {
-    id:            _uuid(),
+    id:            'mits-user-1',
     email:         'admin@yourdomain.com',
     password_hash: 'GWS_AUTH_ONLY',
     name:          '管理者',
@@ -189,6 +189,31 @@ function _uuid() {
   return Utilities.getUuid();
 }
 
+// ユーザーIDを生成する（mits-user-1, mits-user-2, ... の形式）
+function _generateUserId() {
+  var users = _sheetToObjects(getSheet(SHEET_USERS));
+  
+  // ユーザーが存在しない場合は mits-user-1 から開始
+  if (users.length === 0) {
+    return 'mits-user-1';
+  }
+  
+  // 既存のユーザーIDから最大の番号を取得
+  var maxNumber = 0;
+  users.forEach(function(user) {
+    if (user.id && typeof user.id === 'string' && user.id.startsWith('mits-user-')) {
+      var numStr = user.id.replace('mits-user-', '');
+      var num = parseInt(numStr, 10);
+      if (!isNaN(num) && num > maxNumber) {
+        maxNumber = num;
+      }
+    }
+  });
+  
+  // 次の番号を生成
+  return 'mits-user-' + (maxNumber + 1);
+}
+
 // 現在日時を ISO 8601 形式で返す
 function _now() {
   return new Date().toISOString();
@@ -215,9 +240,19 @@ function _getWeekTitle(dateStr) {
 
 // ── キャッシュレイヤー ────────────────────────────────────────
 // スクリプトキャッシュで頻繁にアクセスするシートデータを保持し
-// Sheets への API 呼び出しを削減する（TTL: 300秒）
+// Sheets への API 呼び出しを削減する（TTL: 翌日0時まで）
 
-var CACHE_TTL = 300; // 秒
+// 次の0時（午前0時）までの秒数を計算する
+function _getSecondsUntilMidnight() {
+  var now = new Date();
+  var tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(0, 0, 0, 0);
+  var diff = tomorrow.getTime() - now.getTime();
+  var seconds = Math.floor(diff / 1000);
+  // GAS CacheServiceの最大TTLは21600秒(6時間)なので、それを超える場合は制限
+  return Math.min(seconds, 21600);
+}
 
 var CACHE_KEY_DEPARTMENTS  = 'sheet_departments';
 var CACHE_KEY_USERS        = 'sheet_users';
@@ -245,7 +280,9 @@ function _getCachedData(cacheKey, loader) {
   try {
     var json = JSON.stringify(data);
     if (json.length < 100000) {
-      cache.put(cacheKey, json, CACHE_TTL);
+      var ttl = _getSecondsUntilMidnight();
+      cache.put(cacheKey, json, ttl);
+      Logger.log('キャッシュ保存: ' + cacheKey + ' (TTL: ' + ttl + '秒 / 翌日0時まで)');
     } else {
       Logger.log('データが大きすぎてキャッシュ不可: ' + json.length + ' bytes');
     }

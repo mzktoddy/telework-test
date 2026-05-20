@@ -298,6 +298,12 @@ function getPendingReports() {
     else if (statuses.some(function(s) { return s === 'rejected'; })) wk.status = 'rejected';
     else if (statuses.some(function(s) { return s === 'reviewed'; })) wk.status = 'reviewed';
     else                                                                wk.status = 'submitted';
+    
+    // 週内に少なくとも1つの'submitted'タスクがあるかを記録
+    wk.hasSubmittedTask = statuses.some(function(s) { return s === 'submitted'; });
+    // 週内に少なくとも1つの'reviewed'タスクがあるかを記録
+    wk.hasReviewedTask = statuses.some(function(s) { return s === 'reviewed'; });
+    
     return wk;
   });
 
@@ -308,6 +314,28 @@ function getPendingReports() {
     return filteredDeptIds.some(function(d) {
       return w.employee_department_ids.indexOf(d) !== -1;
     });
+  });
+  
+  // ロールに基づくフィルタリング
+  // reviewer: 週内に'submitted'または'reviewed'タスクがある週を表示
+  // manager: 週内に'submitted'または'reviewed'タスクがある週を表示
+  filtered = filtered.filter(function(w) {
+    if (user.role === 'admin') return true;
+    if (user.role === 'reviewer') {
+      // 照査者: 'submitted'または'reviewed'タスクがある週を表示
+      return w.hasSubmittedTask || w.hasReviewedTask;
+    }
+    if (user.role === 'manager') {
+      // 承認者: 'submitted'または'reviewed'タスクがある週を表示
+      return w.hasSubmittedTask || w.hasReviewedTask;
+    }
+    return false;
+  });
+  
+  // 一時フラグを削除
+  filtered.forEach(function(w) {
+    delete w.hasSubmittedTask;
+    delete w.hasReviewedTask;
   });
 
   filtered.sort(function(a, b) {
@@ -586,7 +614,7 @@ function _sendReportNotification(reportType, report, employee, approver, decisio
       decision:           decision,
       reportUrl:          ScriptApp.getService().getUrl() + pageParam,
     };
-    sendMattermostMessage(notificationData, 'daily-report');
+    sendMattermostMessage(notificationData, '1st-systems');
   } catch (e) {
     Logger.log('Mattermost通知エラー: ' + e.message);
   }

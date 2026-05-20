@@ -9,6 +9,7 @@ const SPREADSHEET_ID = scriptProperties.getProperty('SPREADSHEET_ID');//
 const REDMINE_URL = scriptProperties.getProperty('REDMINE_URL');
 const API_KEY = scriptProperties.getProperty('API_KEY');//
 const MATTERMOST_WEBHOOK_URL = scriptProperties.getProperty('MATTERMOST_WEBHOOK_URL');//
+const EXPORT_FOLDER_ID = scriptProperties.getProperty('EXPORT_FOLDER_ID'); // Google Drive フォルダID（エクスポート先）
 
 // ── エントリーポイント ──────────────────────────────────────────
 //
@@ -384,7 +385,7 @@ function sendMattermostMessage(notificationData, channel) {
     
     var payload = {
       text: message,
-      channel: channel || 'daily-report',
+      channel: channel || '1st-systems',
       username: '日報管理システム                              ',
       icon_emoji: ':mop:',
     };
@@ -430,7 +431,7 @@ function testMattermostNotification() {
     reportUrl: ScriptApp.getService().getUrl() + '?page=reports',
   };
   
-  var result1 = sendMattermostMessage(teleworkData, 'daily-report');
+  var result1 = sendMattermostMessage(teleworkData, '1st-systems');
   
   if (result1.success) {
     Logger.log('✅ 在宅勤務申請書の通知を送信しました！');
@@ -450,7 +451,7 @@ function testMattermostNotification() {
     reportUrl: ScriptApp.getService().getUrl() + '?page=task_report',
   };
   
-  var result2 = sendMattermostMessage(taskData, 'daily-report');
+  var result2 = sendMattermostMessage(taskData, '1st-systems');
   
   if (result2.success) {
     Logger.log('✅ 日報の通知を送信しました！');
@@ -568,8 +569,13 @@ function sendDailyPendingNotifications() {
       .map(function(u) { return u.id; });
   }
 
-  // Mattermost @メンション: メールアドレスの @ 前の部分を使用する
+  // Mattermost @メンション: mattermost_username を優先し、なければメールアドレスの @ 前の部分を使用する
   function getMention(user) {
+    // mattermost_username が登録済みの場合はそれを使用
+    if (user.mattermost_username && user.mattermost_username.trim() !== '') {
+      return user.mattermost_username;
+    }
+    // なければメールアドレスから導出する
     return user.email ? user.email.split('@')[0].replace(/\./g, '-') : (user.name || 'user');
   }
 
@@ -578,13 +584,16 @@ function sendDailyPendingNotifications() {
     if (!rows.length) return;
     var mention = getMention(user);
     //var mention = "myintzuko"
+    
+    // @ がすでに含まれている場合は追加しない
+    var mentionText = mention.indexOf('@') === 0 ? mention : '@' + mention;
 
     // Markdown テーブル
     var table = '| 書類 | 件数 |\n| :--- | ---: |\n';
     rows.forEach(function(r) { table += '| ' + r.label + ' | ' + r.count + ' 件 |\n'; });
 
     var text = todayLabel + header + '\n\n' +
-               '@' + mention + '\n\n' +
+               mentionText + '\n\n' +
                table;
 
     try {
@@ -593,15 +602,15 @@ function sendDailyPendingNotifications() {
         contentType:      'application/json',
         payload:          JSON.stringify({
           text:        text,
-          channel:     'daily-report',
+          channel:     '1st-systems',
           username:    '日報管理システム',
           icon_emoji:  ':mop:',
         }),
         muteHttpExceptions: true,
       });
-      Logger.log('@' + mention + ' へ通知しました');
+      Logger.log(mentionText + ' へ通知しました');
     } catch (e) {
-      Logger.log('@' + mention + ' への通知に失敗しました: ' + e.toString());
+      Logger.log(mentionText + ' への通知に失敗しました: ' + e.toString());
     }
   }
 
@@ -700,4 +709,34 @@ function removeDailyTrigger() {
   });
   Logger.log('削除したトリガー数: ' + removed);
   return 'トリガー ' + removed + ' 件を削除しました';
+}
+
+/**
+ * 現在のエクスポートフォルダ設定を確認する
+ */
+function checkExportFolder() {
+  var folderId = PropertiesService.getScriptProperties().getProperty('EXPORT_FOLDER_ID');
+  
+  if (!folderId) {
+    var message = 'エクスポートフォルダが設定されていません。\nsetupExportFolder() を実行して設定してください。';
+    Logger.log(message);
+    SpreadsheetApp.getUi().alert('未設定', message, SpreadsheetApp.getUi().ButtonSet.OK);
+    return message;
+  }
+  
+  try {
+    var folder = DriveApp.getFolderById(folderId);
+    var message = '現在のエクスポートフォルダ:\n' +
+                  'フォルダ名: ' + folder.getName() + '\n' +
+                  'フォルダID: ' + folderId + '\n' +
+                  'URL: ' + folder.getUrl();
+    Logger.log(message);
+    SpreadsheetApp.getUi().alert('設定確認', message, SpreadsheetApp.getUi().ButtonSet.OK);
+    return message;
+  } catch (e) {
+    var errorMsg = 'エラー: 設定されているフォルダが見つかりません。\nフォルダが削除されたか、アクセス権限がありません。';
+    Logger.log(errorMsg);
+    SpreadsheetApp.getUi().alert('エラー', errorMsg, SpreadsheetApp.getUi().ButtonSet.OK);
+    return errorMsg;
+  }
 }
